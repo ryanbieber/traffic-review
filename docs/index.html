@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Traffic Review</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Traffic-camera review</div>
+          <h1>Check a speeding clip without pretending the math is magic.</h1>
+          <p class="lead">
+            Upload footage, calibrate the road plane with homography, run YOLO tracking, and review an annotated result with exportable evidence.
+          </p>
+          <div class="hero-points">
+            <span>YOLO tracking</span>
+            <span>Perspective calibration</span>
+            <span>CSV + video export</span>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="panel-card">
+            <div class="panel-label">Recommended</div>
+            <strong>4-point road plane</strong>
+            <p>For angled enforcement cameras, homography is the default because raw pixel scaling is weak under perspective distortion.</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="card upload-card">
+          <div class="section-head">
+            <h2>Analyze a Video</h2>
+            <p>Point the frontend at your backend, upload a clip, and review the run.</p>
+          </div>
+
+          <form id="analysis-form">
+            <div class="grid two">
+              <label>
+                <span>API base URL</span>
+                <input id="api-base" name="apiBase" type="url" value="http://localhost:8000" required>
+              </label>
+              <label>
+                <span>YOLO model</span>
+                <select id="model-name" name="modelName">
+                  <option value="yolov8n.pt">yolov8n.pt</option>
+                  <option value="yolov8s.pt">yolov8s.pt</option>
+                  <option value="yolo11n.pt">yolo11n.pt</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>Speed limit (mph)</span>
+                <input id="speed-limit" type="number" min="1" step="1" value="35">
+              </label>
+              <label>
+                <span>Confidence threshold</span>
+                <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>Smoothing window (seconds)</span>
+                <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
+              </label>
+              <label>
+                <span>FPS override</span>
+                <input id="fps-override" type="number" min="0" step="1" value="0">
+              </label>
+            </div>
+
+            <div class="section-head compact">
+              <h3>Perspective Calibration</h3>
+              <p>Enter four road-patch points in clockwise order plus real dimensions.</p>
+            </div>
+
+            <div class="grid four">
+              <label><span>P1 X</span><input id="p1x" type="number" min="0" value="200"></label>
+              <label><span>P1 Y</span><input id="p1y" type="number" min="0" value="200"></label>
+              <label><span>P2 X</span><input id="p2x" type="number" min="0" value="500"></label>
+              <label><span>P2 Y</span><input id="p2y" type="number" min="0" value="200"></label>
+              <label><span>P3 X</span><input id="p3x" type="number" min="0" value="650"></label>
+              <label><span>P3 Y</span><input id="p3y" type="number" min="0" value="500"></label>
+              <label><span>P4 X</span><input id="p4x" type="number" min="0" value="50"></label>
+              <label><span>P4 Y</span><input id="p4y" type="number" min="0" value="500"></label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>Road patch width (m)</span>
+                <input id="patch-width" type="number" min="0.1" step="0.1" value="3.7">
+              </label>
+              <label>
+                <span>Road patch length (m)</span>
+                <input id="patch-length" type="number" min="0.1" step="0.5" value="20">
+              </label>
+            </div>
+
+            <label class="file-field">
+              <span>Video clip</span>
+              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv" required>
+            </label>
+
+            <button class="primary-btn" type="submit">Run Analysis</button>
+          </form>
+        </section>
+
+        <aside class="card notes-card">
+          <div class="section-head">
+            <h2>What this is good for</h2>
+          </div>
+          <ul class="plain-list">
+            <li>Reviewing whether a tagged clip looks directionally consistent with the claimed speed.</li>
+            <li>Comparing several calibration choices before trusting a result.</li>
+            <li>Exporting an annotated video and a summary table for follow-up.</li>
+          </ul>
+          <div class="warning">
+            <strong>Limit:</strong>
+            <p>GitHub Pages can host this frontend, but the YOLO analysis still needs a backend service.</p>
+          </div>
+        </aside>
+      </main>
+
+      <section class="card results-card">
+        <div class="section-head">
+          <h2>Results</h2>
+          <p id="status-text">Waiting for a run.</p>
+        </div>
+
+        <div class="result-meta">
+          <div>
+            <span class="meta-label">Calibration</span>
+            <p id="calibration-text">Not available yet.</p>
+          </div>
+          <div>
+            <span class="meta-label">Review note</span>
+            <p id="note-text">Not available yet.</p>
+          </div>
+        </div>
+
+        <div class="actions">
+          <a id="video-link" class="ghost-btn disabled" href="#" target="_blank" rel="noreferrer">Annotated video</a>
+          <a id="csv-link" class="ghost-btn disabled" href="#" target="_blank" rel="noreferrer">Summary CSV</a>
+        </div>
+
+        <div class="table-wrap">
+          <table id="results-table">
+            <thead>
+              <tr>
+                <th>Track</th>
+                <th>Label</th>
+                <th>Peak mph</th>
+                <th>Avg mph</th>
+                <th>Frames</th>
+                <th>Seen from</th>
+                <th>Seen to</th>
+                <th>Flagged</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="8">No results yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+  </html>
