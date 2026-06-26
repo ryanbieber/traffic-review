@@ -119,25 +119,7 @@ async function main() {
       return meta && !meta.textContent.includes("No clip loaded");
     });
 
-    console.log("Setting calibration points");
-    await page.evaluate(() => {
-      const values = {
-        p1x: "120",
-        p1y: "180",
-        p2x: "420",
-        p2y: "180",
-        p3x: "500",
-        p3y: "360",
-        p4x: "80",
-        p4y: "360",
-      };
-      Object.entries(values).forEach(([id, value]) => {
-        const input = document.querySelector(`#${id}`);
-        input.value = value;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      });
-    });
-
+    console.log("Configuring analysis");
     await page.$eval("#sample-every-frames", (input) => {
       input.value = "4";
       input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -147,8 +129,6 @@ async function main() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    console.log("Submitting analysis");
-    await page.click("button[type='submit']");
     await page.waitForFunction(() => {
       const status = document.querySelector("#status-text");
       return status && status.textContent.includes("Analysis complete");
@@ -159,9 +139,13 @@ async function main() {
       nodes.map((node) => node.textContent.trim()),
     );
     assert.ok(rows.some((row) => row.toLowerCase().includes("bus")));
+    const frameRows = await page.$$eval("#frame-results-table tbody tr", (nodes) =>
+      nodes.map((node) => node.textContent.trim()),
+    );
+    assert.ok(frameRows.some((row) => row.includes("mph")));
 
     const note = await page.$eval("#note-text", (node) => node.textContent || "");
-    assert.match(note, /fully in your browser/i);
+    assert.match(note, /rough browser-side estimates/i);
 
     const csvHref = await page.$eval("#download-csv", (node) => node.getAttribute("href"));
     assert.ok(csvHref && csvHref.startsWith("blob:"));

@@ -17,19 +17,19 @@
           <div class="eyebrow">Traffic-camera review</div>
           <h1>Check a speeding clip without pretending the math is magic.</h1>
           <p class="lead">
-            Upload footage, calibrate the road plane with homography, run YOLO directly in the browser, and review an annotated result without any backend.
+            Drag in a clip, let the browser run YOLO, and get rough speed metrics without configuring camera geometry by hand.
           </p>
           <div class="hero-points">
             <span>Browser YOLO</span>
-            <span>Perspective calibration</span>
-            <span>CSV + WebM export</span>
+            <span>Auto rough speed</span>
+            <span>CSV + JSON + WebM</span>
           </div>
         </div>
         <div class="hero-panel">
           <div class="panel-card">
-            <div class="panel-label">GitHub Pages Ready</div>
-            <strong>4-point road plane</strong>
-            <p>For angled enforcement cameras, homography is the default because raw pixel scaling is weak under perspective distortion.</p>
+            <div class="panel-label">Simple Mode</div>
+            <strong>Drop a clip and run</strong>
+            <p>The app now estimates speed from tracked screen motion and assumed vehicle width, with no manual homography step.</p>
           </div>
         </div>
       </header>
@@ -38,7 +38,7 @@
         <section class="card upload-card">
           <div class="section-head">
             <h2>Analyze a Video</h2>
-            <p>Everything runs locally in your browser. Short clips work best.</p>
+            <p>Everything runs locally in your browser. Drop a short clip and analysis starts automatically.</p>
           </div>
 
           <form id="analysis-form">
@@ -75,52 +75,22 @@
               </label>
             </div>
 
-            <div class="section-head compact">
-              <h3>Perspective Calibration</h3>
-              <p>Upload the clip, then click four corners of a flat road patch in clockwise order.</p>
+            <div id="drop-zone" class="drop-zone">
+              <strong>Drop Video Here</strong>
+              <p>or use the file picker below</p>
             </div>
 
             <div class="preview-shell">
               <canvas id="preview-canvas" width="960" height="540"></canvas>
               <div class="preview-meta">
                 <span id="video-meta">No clip loaded</span>
-                <div class="point-controls">
-                  <button class="ghost-btn mini" type="button" data-point-target="p1">Pick P1</button>
-                  <button class="ghost-btn mini" type="button" data-point-target="p2">Pick P2</button>
-                  <button class="ghost-btn mini" type="button" data-point-target="p3">Pick P3</button>
-                  <button class="ghost-btn mini" type="button" data-point-target="p4">Pick P4</button>
-                </div>
               </div>
-            </div>
-
-            <div class="grid four">
-              <label><span>P1 X</span><input id="p1x" type="number" min="0" value="200"></label>
-              <label><span>P1 Y</span><input id="p1y" type="number" min="0" value="200"></label>
-              <label><span>P2 X</span><input id="p2x" type="number" min="0" value="500"></label>
-              <label><span>P2 Y</span><input id="p2y" type="number" min="0" value="200"></label>
-              <label><span>P3 X</span><input id="p3x" type="number" min="0" value="650"></label>
-              <label><span>P3 Y</span><input id="p3y" type="number" min="0" value="500"></label>
-              <label><span>P4 X</span><input id="p4x" type="number" min="0" value="50"></label>
-              <label><span>P4 Y</span><input id="p4y" type="number" min="0" value="500"></label>
-            </div>
-
-            <div class="grid two">
-              <label>
-                <span>Road patch width (m)</span>
-                <input id="patch-width" type="number" min="0.1" step="0.1" value="3.7">
-              </label>
-              <label>
-                <span>Road patch length (m)</span>
-                <input id="patch-length" type="number" min="0" step="0.5" value="20">
-              </label>
             </div>
 
             <label class="file-field">
               <span>Video clip</span>
               <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
             </label>
-
-            <button class="primary-btn" type="submit">Run Analysis</button>
           </form>
         </section>
 
@@ -129,13 +99,13 @@
             <h2>What this is good for</h2>
           </div>
           <ul class="plain-list">
-            <li>Review whether a tagged clip looks directionally consistent with the claimed speed.</li>
-            <li>Run the whole workflow from a public GitHub Pages site without a backend.</li>
+            <li>Drop in a clip and get rough vehicle-speed estimates without scene setup.</li>
+            <li>See per-track average speed, peak speed, and per-sampled-frame speed metrics.</li>
             <li>Export a summary CSV, JSON record, and annotated WebM review.</li>
           </ul>
           <div class="warning">
             <strong>Limit:</strong>
-            <p>Browser-only inference is heavier than a server pipeline. Keep clips short and expect slower runs on weaker machines.</p>
+            <p>These speeds are rough estimates. Without real camera calibration, angle alone does not recover defensible true road speed.</p>
           </div>
         </aside>
       </main>
@@ -148,12 +118,27 @@
 
         <div class="result-meta">
           <div>
-            <span class="meta-label">Calibration</span>
+            <span class="meta-label">Scale Method</span>
             <p id="calibration-text">Not available yet.</p>
           </div>
           <div>
             <span class="meta-label">Review note</span>
             <p id="note-text">Not available yet.</p>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric-card">
+            <span class="meta-label">Tracked Vehicles</span>
+            <strong id="metric-vehicles">0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="meta-label">Peak Observed</span>
+            <strong id="metric-peak">0.0 mph</strong>
+          </div>
+          <div class="metric-card">
+            <span class="meta-label">Average Observed</span>
+            <strong id="metric-avg">0.0 mph</strong>
           </div>
         </div>
 
@@ -185,6 +170,30 @@
             <tbody>
               <tr>
                 <td colspan="8">No results yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section-head compact">
+          <h3>Per-Frame Metrics</h3>
+          <p>Each row represents a sampled frame in the browser analysis loop.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table id="frame-results-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Vehicles</th>
+                <th>Avg Speed</th>
+                <th>Max Speed</th>
+                <th>Tracks</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="5">No frame metrics yet.</td>
               </tr>
             </tbody>
           </table>

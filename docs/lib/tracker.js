@@ -1,5 +1,3 @@
-const MPS_TO_MPH = 2.2369362920544;
-
 function centroid(box) {
   return [(box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2];
 }
@@ -30,24 +28,35 @@ function estimateSpeed(track, historySeconds) {
     return null;
   }
 
-  const distanceM = Math.hypot(
-    newest.worldPoint[0] - oldest.worldPoint[0],
-    newest.worldPoint[1] - oldest.worldPoint[1],
+  const pixelDistance = Math.hypot(
+    newest.anchorPoint[0] - oldest.anchorPoint[0],
+    newest.anchorPoint[1] - oldest.anchorPoint[1],
   );
-  return (distanceM / elapsed) * MPS_TO_MPH;
+  const averageScale = (newest.metersPerPixel + oldest.metersPerPixel) / 2;
+  const distanceM = pixelDistance * averageScale;
+  return (distanceM / elapsed) * track.speedMultiplier;
 }
 
 export class VehicleTracker {
-  constructor({ historySeconds, speedLimitMph, maxIdleSeconds = 1.5, maxMatchDistance = 140 }) {
+  constructor({
+    historySeconds,
+    speedLimitMph,
+    speedMultiplier = 2.2369362920544,
+    speedUnit = "mph",
+    maxIdleSeconds = 1.5,
+    maxMatchDistance = 140,
+  }) {
     this.historySeconds = historySeconds;
     this.speedLimitMph = speedLimitMph;
+    this.speedMultiplier = speedMultiplier;
+    this.speedUnit = speedUnit;
     this.maxIdleSeconds = maxIdleSeconds;
     this.maxMatchDistance = maxMatchDistance;
     this.nextTrackId = 1;
     this.tracks = new Map();
   }
 
-  update(detections, timeS, projectPointToWorld) {
+  update(detections, timeS, measureDetection) {
     const now = timeS;
     const liveTracks = [...this.tracks.values()].filter(
       (track) => now - track.lastSeenS <= this.maxIdleSeconds,
@@ -85,14 +94,14 @@ export class VehicleTracker {
       matchedTrackIds.add(candidate.trackId);
       matchedDetectionIndexes.add(candidate.detectionIndex);
       const track = this.tracks.get(candidate.trackId);
-      this.#applyDetection(track, detections[candidate.detectionIndex], now, projectPointToWorld);
+      this.#applyDetection(track, detections[candidate.detectionIndex], now, measureDetection);
     }
 
     detections.forEach((detection, detectionIndex) => {
       if (matchedDetectionIndexes.has(detectionIndex)) {
         return;
       }
-      const track = this.#createTrack(detection, now, projectPointToWorld);
+      const track = this.#createTrack(detection, now, measureDetection);
       matchedTrackIds.add(track.id);
     });
 
@@ -109,9 +118,10 @@ export class VehicleTracker {
       const track = this.tracks.get(detection.trackId);
       return {
         ...detection,
-        currentSpeedMph: track.currentSpeedMph,
-        peakSpeedMph: track.peakSpeedMph,
-        flagged: track.peakSpeedMph >= this.speedLimitMph,
+        currentSpeed: track.currentSpeed,
+        peakSpeed: track.peakSpeed,
+        speedUnit: this.speedUnit,
+        flagged: track.peakSpeed >= this.speedLimitMph,
       };
     });
   }
@@ -121,57 +131,59 @@ export class VehicleTracker {
       .map((track) => ({
         track_id: track.id,
         label: track.label,
-        peak_speed_mph: Number(track.peakSpeedMph.toFixed(2)),
-        avg_speed_mph: Number(
+        peak_speed: Number(track.peakSpeed.toFixed(2)),
+        avg_speed: Number(
           (track.speedSamples.length
             ? track.speedSamples.reduce((sum, value) => sum + value, 0) / track.speedSamples.length
             : 0).toFixed(2),
         ),
+        speed_unit: this.speedUnit,
         frames_seen: track.framesSeen,
         first_seen_s: Number(track.firstSeenS.toFixed(2)),
         last_seen_s: Number(track.lastSeenS.toFixed(2)),
-        flagged: track.peakSpeedMph >= this.speedLimitMph,
+        flagged: track.peakSpeed >= this.speedLimitMph,
       }))
-      .sort((left, right) => right.peak_speed_mph - left.peak_speed_mph);
+      .sort((left, right) => right.peak_speed - left.peak_speed);
   }
 
-  #createTrack(detection, timeS, projectPointToWorld) {
+  #createTrack(detection, timeS, measureDetection) {
     const track = {
       id: this.nextTrackId,
       classId: detection.classId,
       label: detection.label,
       box: detection.box,
-      currentSpeedMph: 0,
-      peakSpeedMph: 0,
+      currentSpeed: 0,
+      peakSpeed: 0,
       speedSamples: [],
       history: [],
       firstSeenS: timeS,
       lastSeenS: timeS,
       framesSeen: 0,
+      speedMultiplier: this.speedMultiplier,
     };
     this.nextTrackId += 1;
     this.tracks.set(track.id, track);
-    this.#applyDetection(track, detection, timeS, projectPointToWorld);
+    this.#applyDetection(track, detection, timeS, measureDetection);
     return track;
   }
 
-  #applyDetection(track, detection, timeS, projectPointToWorld) {
+  #applyDetection(track, detection, timeS, measureDetection) {
     track.box = detection.box;
     track.lastSeenS = timeS;
     track.framesSeen += 1;
-    const anchorPoint = [
-      (detection.box.x1 + detection.box.x2) / 2,
-      detection.box.y2,
-    ];
-    const worldPoint = projectPointToWorld(anchorPoint);
-    track.history.push({ timeS, worldPoint });
+    const measurement = measureDetection(detection);
+    track.history.push({
+      timeS,
+      anchorPoint: measurement.anchorPoint,
+      metersPerPixel: measurement.metersPerPixel,
+    });
     track.history = track.history.filter((entry) => timeS - entry.timeS <= this.historySeconds * 2.5);
 
     const speed = estimateSpeed(track, this.historySeconds);
     if (speed !== null && Number.isFinite(speed)) {
-      track.currentSpeedMph = speed;
+      track.currentSpeed = speed;
       track.speedSamples.push(speed);
-      track.peakSpeedMph = Math.max(track.peakSpeedMph, speed);
+      track.peakSpeed = Math.max(track.peakSpeed, speed);
     }
 
     detection.trackId = track.id;

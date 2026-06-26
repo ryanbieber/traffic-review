@@ -1,26 +1,25 @@
 # Traffic Review
 
-A GitHub Pages-compatible web app for reviewing traffic-camera footage with browser-side YOLO detection, tracking, homography, and speed estimation.
+A GitHub Pages-compatible web app for reviewing traffic-camera footage with browser-side YOLO detection, tracking, and rough speed estimation.
 
 ## What it does
 
 - Runs entirely in the browser from the static `docs/` site.
 - Accepts a local traffic-camera video file without uploading it to a server.
 - Loads a YOLOv8 ONNX model directly in the browser through ONNX Runtime Web.
-- Uses a 4-point perspective calibration to correct for angled camera views.
-- Tracks detected vehicles and estimates speed from projected road-plane motion.
+- Starts analysis automatically after a file is dropped or selected.
+- Tracks detected vehicles and produces rough speed estimates from screen motion plus assumed vehicle width.
 - Exports a summary CSV, JSON analysis record, and an annotated WebM review clip.
 
 ## Important limitation
 
-This is still review tooling, not certified enforcement measurement. The estimates depend on your road-plane calibration, the visible quality of the clip, and the performance of the user’s browser.
+This is still review tooling, not certified enforcement measurement. The current simple mode does not use explicit scene calibration, so the speed values are rough estimates rather than defensible true road speed.
 
 ## Architecture
 
 - `docs/`: the deployable GitHub Pages app.
 - `docs/app.js`: browser workflow, replay, and export logic.
 - `docs/lib/yolo.js`: ONNX Runtime Web inference and YOLO postprocessing.
-- `docs/lib/homography.js`: client-side homography solve and point projection.
 - `docs/lib/tracker.js`: lightweight vehicle tracking and speed estimation.
 - `docs/assets/models/yolov8n.onnx`: browser-loaded YOLO model.
 
@@ -39,6 +38,7 @@ Then open `http://127.0.0.1:4173/`.
 - The app seeks through the video in sampled intervals, so shorter clips are much more practical.
 - WebGPU is attempted first where available, then the app falls back to WASM.
 - On weaker machines, longer clips will run slowly or hit memory limits.
+- Some MP4 files still fail if the browser cannot decode the video codec inside the container.
 
 ## GitHub Pages
 
@@ -62,12 +62,11 @@ cd /home/carnufex/traffic-review
 npm run test:browser
 ```
 
-The smoke test serves `docs/`, generates a small in-browser WebM clip from a real bus image, runs the full browser-only analysis path in headless Chrome, and verifies that the app produces a result row and downloadable CSV.
+The smoke test serves `docs/`, generates a small in-browser WebM clip from a real bus image, runs the browser-only analysis path in headless Chrome, and verifies that the app produces result rows and downloadable output.
 
 ## Recommended workflow for real clips
 
 1. Use fixed-camera footage.
 2. Keep clips short enough that in-browser processing is realistic.
-3. Mark four corners of a flat road patch in clockwise order.
-4. Re-run with tighter points if the first estimate looks unstable.
-5. Compare the annotated replay and exported summary, not just one number.
+3. Treat the reported speeds as rough estimates, not survey-grade measurements.
+4. Compare the annotated replay and exported summary, not just one number.

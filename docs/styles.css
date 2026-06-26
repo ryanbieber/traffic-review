@@ -105,6 +105,20 @@ h1 {
   margin-bottom: 18px;
 }
 
+.drop-zone {
+  border: 2px dashed rgba(32, 79, 68, 0.35);
+  border-radius: 24px;
+  padding: 26px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.55);
+  margin-bottom: 18px;
+}
+
+.drop-zone.dragover {
+  border-color: var(--accent);
+  background: rgba(180, 67, 47, 0.08);
+}
+
 #preview-canvas {
   width: 100%;
   height: auto;
@@ -121,12 +135,6 @@ h1 {
   margin-top: 12px;
   align-items: center;
   color: var(--muted);
-}
-
-.point-controls {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 
 .hero-panel {
@@ -229,17 +237,6 @@ select {
   color: var(--text);
 }
 
-.ghost-btn.active,
-.primary-btn.active {
-  background: var(--accent-2);
-  color: white;
-}
-
-.ghost-btn.mini {
-  padding: 9px 12px;
-  font-size: 0.9rem;
-}
-
 .primary-btn:hover,
 .ghost-btn:hover {
   transform: translateY(-1px);
@@ -300,6 +297,26 @@ select {
   transition: width 180ms ease;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 16px 18px;
+}
+
+.metric-card strong {
+  display: block;
+  font-size: 1.7rem;
+  margin-top: 6px;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -335,6 +352,7 @@ tbody tr.flagged {
   .hero,
   .layout,
   .result-meta,
+  .metric-grid,
   .grid.two,
   .grid.four {
     grid-template-columns: 1fr;
