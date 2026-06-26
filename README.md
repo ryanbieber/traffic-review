@@ -7,8 +7,9 @@ A GitHub Pages-compatible web app for reviewing traffic-camera footage with brow
 - Runs entirely in the browser from the static `docs/` site.
 - Accepts a local traffic-camera video file without uploading it to a server.
 - Loads a YOLOv8 ONNX model directly in the browser through ONNX Runtime Web.
-- Starts analysis automatically after a file is dropped or selected.
-- Tracks detected vehicles and produces rough speed estimates from screen motion plus assumed vehicle width.
+- Scans the clip automatically after a file is dropped or selected.
+- Lets you click the specific vehicle you want to track when multiple vehicles are visible.
+- Tracks only that selected vehicle and produces rough speed estimates from screen motion plus assumed vehicle width.
 - Exports a summary CSV, JSON analysis record, and an annotated WebM review clip.
 
 ## Important limitation
@@ -62,11 +63,12 @@ cd /home/carnufex/traffic-review
 npm run test:browser
 ```
 
-The smoke test serves `docs/`, generates a small in-browser WebM clip from a real bus image, runs the browser-only analysis path in headless Chrome, and verifies that the app produces result rows and downloadable output.
+The smoke test serves `docs/`, generates a small in-browser WebM clip from a real bus image, waits for the selection prompt, clicks a detected vehicle on the canvas, and verifies that the app produces target-specific results and downloadable output.
 
 ## Recommended workflow for real clips
 
 1. Use fixed-camera footage.
 2. Keep clips short enough that in-browser processing is realistic.
-3. Treat the reported speeds as rough estimates, not survey-grade measurements.
-4. Compare the annotated replay and exported summary, not just one number.
+3. Click the specific vehicle you want to track if multiple vehicles are present.
+4. Treat the reported speeds as rough estimates, not survey-grade measurements.
+5. Compare the annotated replay and exported summary, not just one number.

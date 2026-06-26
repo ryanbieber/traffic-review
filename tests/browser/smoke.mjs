@@ -119,15 +119,27 @@ async function main() {
       return meta && !meta.textContent.includes("No clip loaded");
     });
 
-    console.log("Configuring analysis");
-    await page.$eval("#sample-every-frames", (input) => {
-      input.value = "4";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+    console.log("Waiting for target-pick prompt");
+    await page.waitForFunction(() => {
+      const status = document.querySelector("#status-text");
+      return status && status.textContent.includes("Click the vehicle");
+    }, { timeout: 180000 });
+
+    console.log("Clicking detected target");
+    const targetBox = await page.evaluate(() => {
+      const detections = window.__trafficReview.selectionFrame?.detections || [];
+      const detection = detections[1] || detections[0];
+      const canvas = document.querySelector("#preview-canvas");
+      return detection
+        ? { box: detection.box, width: canvas.width, height: canvas.height }
+        : null;
     });
-    await page.$eval("#fps-override", (input) => {
-      input.value = "5";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    assert.ok(targetBox);
+    const canvasHandle = await page.$("#preview-canvas");
+    await canvasHandle.evaluate((node) => node.scrollIntoView({ block: "center" }));
+    const offsetX = (targetBox.box.x1 + targetBox.box.x2) / 2;
+    const offsetY = (targetBox.box.y1 + targetBox.box.y2) / 2;
+    await canvasHandle.click({ offset: { x: offsetX, y: offsetY } });
 
     await page.waitForFunction(() => {
       const status = document.querySelector("#status-text");
@@ -145,7 +157,7 @@ async function main() {
     assert.ok(frameRows.some((row) => row.includes("mph")));
 
     const note = await page.$eval("#note-text", (node) => node.textContent || "");
-    assert.match(note, /rough browser-side estimates/i);
+    assert.match(note, /only the vehicle you clicked/i);
 
     const csvHref = await page.$eval("#download-csv", (node) => node.getAttribute("href"));
     assert.ok(csvHref && csvHref.startsWith("blob:"));

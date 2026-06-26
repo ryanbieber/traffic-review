@@ -54,6 +54,7 @@ export class VehicleTracker {
     this.maxMatchDistance = maxMatchDistance;
     this.nextTrackId = 1;
     this.tracks = new Map();
+    this.completedTracks = [];
   }
 
   update(detections, timeS, measureDetection) {
@@ -110,6 +111,7 @@ export class VehicleTracker {
         continue;
       }
       if (now - track.lastSeenS > this.maxIdleSeconds) {
+        this.completedTracks.push(track);
         this.tracks.delete(trackId);
       }
     }
@@ -127,7 +129,7 @@ export class VehicleTracker {
   }
 
   getSummaryRows() {
-    return [...this.tracks.values()]
+    return [...this.completedTracks, ...this.tracks.values()]
       .map((track) => ({
         track_id: track.id,
         label: track.label,
