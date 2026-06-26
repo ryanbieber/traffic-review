@@ -1,77 +1,73 @@
 # Traffic Review
 
-A web app for reviewing traffic-camera footage with YOLO-based vehicle detection, tracking, and speed estimation.
+A GitHub Pages-compatible web app for reviewing traffic-camera footage with browser-side YOLO detection, tracking, homography, and speed estimation.
 
 ## What it does
 
-- Serves a real frontend website from `docs/`.
-- Accepts traffic-camera uploads through a FastAPI backend.
-- Uses YOLO to detect and track vehicles.
-- Estimates speed from tracked motion after perspective calibration.
-- Exports an annotated review video and a CSV summary.
+- Runs entirely in the browser from the static `docs/` site.
+- Accepts a local traffic-camera video file without uploading it to a server.
+- Loads a YOLOv8 ONNX model directly in the browser through ONNX Runtime Web.
+- Uses a 4-point perspective calibration to correct for angled camera views.
+- Tracks detected vehicles and estimates speed from projected road-plane motion.
+- Exports a summary CSV, JSON analysis record, and an annotated WebM review clip.
 
 ## Important limitation
 
-GitHub Pages can only host the frontend. The YOLO, OpenCV, and video-processing pipeline still needs a backend server. This project is designed for review and sanity-checking, not certified enforcement.
+This is still review tooling, not certified enforcement measurement. The estimates depend on your road-plane calibration, the visible quality of the clip, and the performance of the user’s browser.
 
 ## Architecture
 
-- `docs/`: Static site for GitHub Pages.
-- `src/traffic_review/api.py`: FastAPI backend.
-- `src/traffic_review/analyzer.py`: YOLO tracking, speed estimation, and annotation.
-- `src/traffic_review/calibration.py`: Homography and scale calibration helpers.
+- `docs/`: the deployable GitHub Pages app.
+- `docs/app.js`: browser workflow, replay, and export logic.
+- `docs/lib/yolo.js`: ONNX Runtime Web inference and YOLO postprocessing.
+- `docs/lib/homography.js`: client-side homography solve and point projection.
+- `docs/lib/tracker.js`: lightweight vehicle tracking and speed estimation.
+- `docs/assets/models/yolov8n.onnx`: browser-loaded YOLO model.
 
 ## Local run
 
 ```bash
 cd /home/carnufex/traffic-review
-uv sync
-PYTHONPATH=src .venv/bin/uvicorn traffic_review.api:app --reload
+python3 -m http.server 4173 --directory docs
 ```
 
-Then open:
+Then open `http://127.0.0.1:4173/`.
 
-- `http://localhost:8000/site/` for the website
-- `http://localhost:8000/api/health` for the API health check
+## Browser-only behavior
+
+- The uploaded file stays local to the browser session.
+- The app seeks through the video in sampled intervals, so shorter clips are much more practical.
+- WebGPU is attempted first where available, then the app falls back to WASM.
+- On weaker machines, longer clips will run slowly or hit memory limits.
 
 ## GitHub Pages
 
 The included workflow at `.github/workflows/pages.yml` deploys the `docs/` folder to GitHub Pages when you push `main`.
 
-To publish it:
+This repo is already set up for that model. No backend deployment is required.
 
-1. Create a new GitHub repository named `traffic-review`.
-2. Add it as the remote:
+## Validation
 
-```bash
-git -C /home/carnufex/traffic-review remote add origin git@github.com:YOUR_USER/traffic-review.git
-```
-
-3. Commit and push:
+- Unit tests:
 
 ```bash
-git -C /home/carnufex/traffic-review add .
-git -C /home/carnufex/traffic-review commit -m "Build web app version of traffic review"
-git -C /home/carnufex/traffic-review branch -M main
-git -C /home/carnufex/traffic-review push -u origin main
+cd /home/carnufex/traffic-review
+npm run test:unit
 ```
 
-4. In GitHub repository settings, enable Pages with `GitHub Actions`.
+- Browser smoke test:
 
-## Backend hosting
+```bash
+cd /home/carnufex/traffic-review
+npm run test:browser
+```
 
-You still need a backend host for the actual analysis. Reasonable choices are:
+The smoke test serves `docs/`, generates a small in-browser WebM clip from a real bus image, runs the full browser-only analysis path in headless Chrome, and verifies that the app produces a result row and downloadable CSV.
 
-- Render
-- Railway
-- Fly.io
-- A GPU-enabled VPS if you want faster runs
-
-Once deployed, set the frontend's `API base URL` field to that backend origin.
-
-## Recommended workflow
+## Recommended workflow for real clips
 
 1. Use fixed-camera footage.
-2. Default to the `4-point road plane` calibration.
-3. Re-run with tighter points if the first estimate looks unstable.
-4. Compare the annotated clip and the exported summary, not just one number.
+2. Keep clips short enough that in-browser processing is realistic.
+3. Mark four corners of a flat road patch in clockwise order.
+4. Re-run with tighter points if the first estimate looks unstable.
+5. Compare the annotated replay and exported summary, not just one number.

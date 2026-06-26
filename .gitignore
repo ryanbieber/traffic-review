@@ -15,3 +15,4 @@ outputs/
 # Tooling caches
 .pytest_cache/
 docs/.DS_Store
+node_modules/

@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
   </head>
   <body>
     <div class="page-shell">
@@ -16,17 +17,17 @@
           <div class="eyebrow">Traffic-camera review</div>
           <h1>Check a speeding clip without pretending the math is magic.</h1>
           <p class="lead">
-            Upload footage, calibrate the road plane with homography, run YOLO tracking, and review an annotated result with exportable evidence.
+            Upload footage, calibrate the road plane with homography, run YOLO directly in the browser, and review an annotated result without any backend.
           </p>
           <div class="hero-points">
-            <span>YOLO tracking</span>
+            <span>Browser YOLO</span>
             <span>Perspective calibration</span>
-            <span>CSV + video export</span>
+            <span>CSV + WebM export</span>
           </div>
         </div>
         <div class="hero-panel">
           <div class="panel-card">
-            <div class="panel-label">Recommended</div>
+            <div class="panel-label">GitHub Pages Ready</div>
             <strong>4-point road plane</strong>
             <p>For angled enforcement cameras, homography is the default because raw pixel scaling is weak under perspective distortion.</p>
           </div>
@@ -37,25 +38,10 @@
         <section class="card upload-card">
           <div class="section-head">
             <h2>Analyze a Video</h2>
-            <p>Point the frontend at your backend, upload a clip, and review the run.</p>
+            <p>Everything runs locally in your browser. Short clips work best.</p>
           </div>
 
           <form id="analysis-form">
-            <div class="grid two">
-              <label>
-                <span>API base URL</span>
-                <input id="api-base" name="apiBase" type="url" value="http://localhost:8000" required>
-              </label>
-              <label>
-                <span>YOLO model</span>
-                <select id="model-name" name="modelName">
-                  <option value="yolov8n.pt">yolov8n.pt</option>
-                  <option value="yolov8s.pt">yolov8s.pt</option>
-                  <option value="yolo11n.pt">yolo11n.pt</option>
-                </select>
-              </label>
-            </div>
-
             <div class="grid two">
               <label>
                 <span>Speed limit (mph)</span>
@@ -73,14 +59,38 @@
                 <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
               </label>
               <label>
-                <span>FPS override</span>
-                <input id="fps-override" type="number" min="0" step="1" value="0">
+                <span>Video FPS</span>
+                <input id="fps-override" type="number" min="1" step="1" value="30">
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>Sample every N frames</span>
+                <input id="sample-every-frames" type="number" min="1" step="1" value="3">
+              </label>
+              <label>
+                <span>Inference engine</span>
+                <input id="engine-text" type="text" value="Model not loaded yet" readonly>
               </label>
             </div>
 
             <div class="section-head compact">
               <h3>Perspective Calibration</h3>
-              <p>Enter four road-patch points in clockwise order plus real dimensions.</p>
+              <p>Upload the clip, then click four corners of a flat road patch in clockwise order.</p>
+            </div>
+
+            <div class="preview-shell">
+              <canvas id="preview-canvas" width="960" height="540"></canvas>
+              <div class="preview-meta">
+                <span id="video-meta">No clip loaded</span>
+                <div class="point-controls">
+                  <button class="ghost-btn mini" type="button" data-point-target="p1">Pick P1</button>
+                  <button class="ghost-btn mini" type="button" data-point-target="p2">Pick P2</button>
+                  <button class="ghost-btn mini" type="button" data-point-target="p3">Pick P3</button>
+                  <button class="ghost-btn mini" type="button" data-point-target="p4">Pick P4</button>
+                </div>
+              </div>
             </div>
 
             <div class="grid four">
@@ -107,7 +117,7 @@
 
             <label class="file-field">
               <span>Video clip</span>
-              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv" required>
+              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
             </label>
 
             <button class="primary-btn" type="submit">Run Analysis</button>
@@ -119,13 +129,13 @@
             <h2>What this is good for</h2>
           </div>
           <ul class="plain-list">
-            <li>Reviewing whether a tagged clip looks directionally consistent with the claimed speed.</li>
-            <li>Comparing several calibration choices before trusting a result.</li>
-            <li>Exporting an annotated video and a summary table for follow-up.</li>
+            <li>Review whether a tagged clip looks directionally consistent with the claimed speed.</li>
+            <li>Run the whole workflow from a public GitHub Pages site without a backend.</li>
+            <li>Export a summary CSV, JSON record, and annotated WebM review.</li>
           </ul>
           <div class="warning">
             <strong>Limit:</strong>
-            <p>GitHub Pages can host this frontend, but the YOLO analysis still needs a backend service.</p>
+            <p>Browser-only inference is heavier than a server pipeline. Keep clips short and expect slower runs on weaker machines.</p>
           </div>
         </aside>
       </main>
@@ -148,8 +158,14 @@
         </div>
 
         <div class="actions">
-          <a id="video-link" class="ghost-btn disabled" href="#" target="_blank" rel="noreferrer">Annotated video</a>
-          <a id="csv-link" class="ghost-btn disabled" href="#" target="_blank" rel="noreferrer">Summary CSV</a>
+          <a id="download-csv" class="ghost-btn disabled" href="#">Summary CSV</a>
+          <a id="download-json" class="ghost-btn disabled" href="#">Analysis JSON</a>
+          <a id="export-video" class="ghost-btn disabled" href="#">Annotated WebM</a>
+          <button id="replay-button" class="ghost-btn disabled" type="button">Replay Review</button>
+        </div>
+
+        <div class="progress-track">
+          <div id="progress-bar"></div>
         </div>
 
         <div class="table-wrap">
