@@ -148,11 +148,7 @@ async function main() {
     });
 
     console.log("Submitting analysis");
-    await page.evaluate(() => {
-      document
-        .querySelector("#analysis-form")
-        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    });
+    await page.click("button[type='submit']");
     await page.waitForFunction(() => {
       const status = document.querySelector("#status-text");
       return status && status.textContent.includes("Analysis complete");
