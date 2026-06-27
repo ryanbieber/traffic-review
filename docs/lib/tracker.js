@@ -69,6 +69,37 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
     return Math.abs(worldSlope) * track.speedMultiplier;
   }
 
+  if (roadAxis) {
+    const cumulativeSamples = [];
+    let cumulativeDistanceM = 0;
+    cumulativeSamples.push({ timeS: relevant[0].timeS, distanceM: 0 });
+
+    for (let index = 1; index < relevant.length; index += 1) {
+      const previous = relevant[index - 1];
+      const current = relevant[index];
+      const deltaX = current.anchorPoint[0] - previous.anchorPoint[0];
+      const deltaY = current.anchorPoint[1] - previous.anchorPoint[1];
+      const axis = normalizeVector(roadAxis);
+      const pixelDistance = axis
+        ? Math.abs(deltaX * axis[0] + deltaY * axis[1])
+        : Math.hypot(deltaX, deltaY);
+      const averageScale = (current.metersPerPixel + previous.metersPerPixel) / 2;
+      const segmentDistanceM = pixelDistance * averageScale;
+      if (Number.isFinite(segmentDistanceM) && segmentDistanceM >= 0) {
+        cumulativeDistanceM += segmentDistanceM;
+      }
+      cumulativeSamples.push({
+        timeS: current.timeS,
+        distanceM: cumulativeDistanceM,
+      });
+    }
+
+    const cumulativeSlope = fitSlope(cumulativeSamples, (entry) => entry.distanceM);
+    if (cumulativeSlope !== null && Number.isFinite(cumulativeSlope)) {
+      return Math.abs(cumulativeSlope) * track.speedMultiplier;
+    }
+  }
+
   let distanceM = null;
   let oldest = relevant[0] || track.history[0];
   for (let index = track.history.length - 2; index >= 0; index -= 1) {
