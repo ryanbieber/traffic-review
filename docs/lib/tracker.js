@@ -39,14 +39,23 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
     return null;
   }
 
-  const deltaX = newest.anchorPoint[0] - oldest.anchorPoint[0];
-  const deltaY = newest.anchorPoint[1] - oldest.anchorPoint[1];
-  const axis = normalizeVector(roadAxis);
-  const pixelDistance = axis
-    ? Math.abs(deltaX * axis[0] + deltaY * axis[1])
-    : Math.hypot(deltaX, deltaY);
-  const averageScale = (newest.metersPerPixel + oldest.metersPerPixel) / 2;
-  const distanceM = pixelDistance * averageScale;
+  let distanceM = null;
+  if (newest.worldPoint && oldest.worldPoint) {
+    distanceM = Math.hypot(
+      newest.worldPoint[0] - oldest.worldPoint[0],
+      newest.worldPoint[1] - oldest.worldPoint[1],
+    );
+  } else {
+    const deltaX = newest.anchorPoint[0] - oldest.anchorPoint[0];
+    const deltaY = newest.anchorPoint[1] - oldest.anchorPoint[1];
+    const axis = normalizeVector(roadAxis);
+    const pixelDistance = axis
+      ? Math.abs(deltaX * axis[0] + deltaY * axis[1])
+      : Math.hypot(deltaX, deltaY);
+    const averageScale = (newest.metersPerPixel + oldest.metersPerPixel) / 2;
+    distanceM = pixelDistance * averageScale;
+  }
+
   return (distanceM / elapsed) * track.speedMultiplier;
 }
 
@@ -193,6 +202,7 @@ export class VehicleTracker {
       timeS,
       anchorPoint: measurement.anchorPoint,
       metersPerPixel: measurement.metersPerPixel,
+      worldPoint: measurement.worldPoint || null,
     });
     track.history = track.history.filter((entry) => timeS - entry.timeS <= this.historySeconds * 2.5);
 
@@ -204,5 +214,6 @@ export class VehicleTracker {
     }
 
     detection.trackId = track.id;
+    detection.worldPoint = measurement.worldPoint || null;
   }
 }

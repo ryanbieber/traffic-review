@@ -7,6 +7,10 @@ export function getSpeedLimitMph() {
   return readNumber("#speed-limit", 35);
 }
 
+export function getReportedSpeedMph() {
+  return readNumber("#reported-speed", 0);
+}
+
 export function getConfidenceThreshold() {
   return readNumber("#confidence-threshold", 0.35);
 }

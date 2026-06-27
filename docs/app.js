@@ -2,6 +2,7 @@ import { VehicleTracker } from "./lib/tracker.js";
 import {
   getConfidenceThreshold,
   getHistorySeconds,
+  getReportedSpeedMph,
   getSpeedLimitMph,
 } from "./lib/settings.js";
 import { estimateRoadCalibration } from "./lib/perspective.js";
@@ -201,6 +202,22 @@ function setDownload(anchor, name, content, type) {
   anchor.classList.remove("disabled");
 }
 
+function describeCalibration(calibration) {
+  if (!calibration) {
+    return "Automatic scale from vehicle width";
+  }
+  const method = calibration.homography ? "Lane homography" : "Lane fallback";
+  const details = [];
+  if (calibration.laneSpacingPx) {
+    details.push(`lane ${calibration.laneSpacingPx.toFixed(0)}px`);
+  }
+  if (calibration.dashCyclePx) {
+    details.push(`dash ${calibration.dashCyclePx.toFixed(0)}px`);
+  }
+  details.push(`${Math.round(calibration.confidence * 100)}% confidence`);
+  return `${method} ${calibration.angleDeg.toFixed(0)}deg - ${details.join(" - ")}`;
+}
+
 function buildCsv(rows, headers) {
   const lines = [headers.join(",")];
   rows.forEach((row) => {
@@ -370,12 +387,15 @@ function getMetersPerPixel(detection) {
 
 function measureDetection(detection) {
   const anchorY = detection.box.y2;
+  const anchorPoint = [
+    (detection.box.x1 + detection.box.x2) / 2,
+    anchorY,
+  ];
+  const worldPoint = appState.roadCalibration?.projectPoint?.(anchorPoint);
   const calibratedScale = appState.roadCalibration?.scaleAtY?.(anchorY);
   return {
-    anchorPoint: [
-      (detection.box.x1 + detection.box.x2) / 2,
-      anchorY,
-    ],
+    anchorPoint,
+    worldPoint: worldPoint && worldPoint.every(Number.isFinite) ? worldPoint : null,
     metersPerPixel: calibratedScale && Number.isFinite(calibratedScale) ? calibratedScale : getMetersPerPixel(detection),
   };
 }
@@ -458,12 +478,12 @@ function renderSampleGallery() {
     .join("");
 }
 
-function buildSampleTimes(duration, fps, step, selectionTimeS, analysisWindowSeconds = 2.5) {
+function buildSampleTimes(duration, fps, step, selectionTimeS, analysisWindowSeconds = 5) {
   const times = [];
   const samplePeriodS = step / fps;
-  const startTimeS = Math.max(0, Math.min(selectionTimeS, Math.max(0, duration - 0.001)));
-  const endTimeS = Math.min(Math.max(0, duration - 0.001), startTimeS + analysisWindowSeconds);
-  const sampleCount = Math.min(3, Math.max(1, Math.ceil(Math.max(0.001, endTimeS - startTimeS) / samplePeriodS)));
+  const startTimeS = Math.max(0, Math.min(selectionTimeS - analysisWindowSeconds / 2, Math.max(0, duration - 0.001)));
+  const endTimeS = Math.min(Math.max(0, duration - 0.001), selectionTimeS + analysisWindowSeconds / 2);
+  const sampleCount = Math.min(5, Math.max(1, Math.ceil(Math.max(0.001, endTimeS - startTimeS) / samplePeriodS)));
   for (let index = 0; index < sampleCount; index += 1) {
     times.push(Number(Math.min(startTimeS + index * samplePeriodS, endTimeS).toFixed(3)));
   }
@@ -580,6 +600,15 @@ async function analyzeSelectedVehicle() {
   }));
 
   const summary = tracker.getSummaryRows().filter((row) => row.track_id === selectedTrackId);
+  const worldPoints = allSamples
+    .flatMap((sample) => sample.detections.map((item) => item.worldPoint))
+    .filter((point) => Array.isArray(point) && point.every(Number.isFinite));
+  const projectedDistanceM = worldPoints.length >= 2
+    ? Math.hypot(
+      worldPoints[worldPoints.length - 1][0] - worldPoints[0][0],
+      worldPoints[worldPoints.length - 1][1] - worldPoints[0][1],
+    )
+    : null;
   const frameMetrics = allSamples.map((sample) => {
     const speeds = sample.detections
       .map((item) => item.currentSpeed)
@@ -596,6 +625,10 @@ async function analyzeSelectedVehicle() {
 
   const peakObserved = summary.length ? Math.max(...summary.map((row) => row.peak_speed)) : 0;
   const avgObserved = summary.length ? summary[0].avg_speed : 0;
+  const reportedSpeedMph = getReportedSpeedMph();
+  const speedDeltaMph = reportedSpeedMph > 0 && peakObserved > 0
+    ? Number((peakObserved - reportedSpeedMph).toFixed(2))
+    : null;
 
   appState.analysis = {
     fps: appState.estimatedFps,
@@ -604,26 +637,32 @@ async function analyzeSelectedVehicle() {
     targetClass: appState.selectedTarget.label,
     summary,
     frameMetrics,
+    reportedSpeedMph: reportedSpeedMph > 0 ? reportedSpeedMph : null,
+    speedDeltaMph,
+    calibrationDiagnostics: appState.roadCalibration
+      ? {
+        method: appState.roadCalibration.method,
+        confidence: appState.roadCalibration.confidence,
+        laneSpacingPx: appState.roadCalibration.laneSpacingPx,
+        dashCyclePx: appState.roadCalibration.dashCyclePx,
+        laneWidthMeters: appState.roadCalibration.laneWidthMeters,
+        dashCycleMeters: appState.roadCalibration.dashCycleMeters,
+        projectedDistanceM,
+        homographyPoints: appState.roadCalibration.homographyPoints,
+      }
+      : null,
     samples: allSamples,
     note:
-      "This tracks only the vehicle you clicked. Speeds are estimated from the selected frame sequence using lane-marking geometry when available, with a vehicle-width fallback if the markings are weak.",
+      "This tracks only the vehicle you clicked. Reported speed is shown only for comparison and is not used to calibrate the estimate.",
   };
 
   elements.metricVehicles.textContent = summary.length ? "1" : "0";
   elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
   elements.metricAvg.textContent = `${avgObserved.toFixed(1)} mph`;
-  elements.calibrationText.textContent = "Auto rough scale from selected vehicle width";
-  if (appState.roadCalibration) {
-    const details = appState.roadCalibration.method.includes("lane")
-      ? "Lane markings and road edge"
-      : "Road axis";
-    elements.calibrationText.textContent = `${details} ${appState.roadCalibration.angleDeg.toFixed(0)}° • ${
-      appState.roadCalibration.referenceScaleMPerPx
-        ? `${(appState.roadCalibration.referenceScaleMPerPx * 3.28084).toFixed(3)} ft/px at reference row`
-        : "scale fallback"
-    }`;
-  }
-  elements.noteText.textContent = appState.analysis.note;
+  elements.calibrationText.textContent = describeCalibration(appState.roadCalibration);
+  elements.noteText.textContent = reportedSpeedMph > 0
+    ? `${appState.analysis.note} Peak differs from reported by ${speedDeltaMph?.toFixed(1) ?? "n/a"} mph.`
+    : appState.analysis.note;
 
   renderSummaryTable(summary);
   renderFrameTable(frameMetrics);
@@ -768,9 +807,7 @@ async function prepareSelection(file) {
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, null);
   elements.noteText.textContent = "Choose a sampled frame, click the vehicle, then analyze it.";
   elements.selectionText.textContent = "Selected vehicle: none";
-  elements.calibrationText.textContent = appState.roadCalibration
-    ? `Lane-marking calibration ${appState.roadCalibration.angleDeg.toFixed(0)}° from sample frames`
-    : "Automatic scale from vehicle width";
+  elements.calibrationText.textContent = describeCalibration(appState.roadCalibration);
   setStatus("Choose a sample frame, then click the vehicle you want to track.");
 }
 
@@ -832,9 +869,13 @@ elements.previewCanvas.addEventListener("click", async (event) => {
 
   console.info("Selected target", target.label, target.box);
   appState.selectedTarget = target;
+  appState.roadCalibration = estimateRoadCalibration(appState.selectionSamples, {
+    targetBox: target.box,
+  });
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, target.trackId);
   setAnalyzeButtonEnabled(true);
   elements.selectionText.textContent = `Selected vehicle: ${target.label}`;
+  elements.calibrationText.textContent = describeCalibration(appState.roadCalibration);
   setStatus(`Selected ${target.label}. Press Analyze selected vehicle.`);
 });
 

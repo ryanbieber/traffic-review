@@ -1,3 +1,5 @@
+import { computeHomography, projectPoint as projectHomographyPoint } from "./homography.js";
+
 const DEFAULT_LANE_WIDTH_M = 3.6576;
 const DEFAULT_DASH_LENGTH_M = 3.048;
 const DEFAULT_DASH_GAP_M = 9.144;
@@ -448,7 +450,7 @@ function sampleLineProfile(frame, line, yStart, yEnd) {
   return values;
 }
 
-function estimateDashScale(frame, line, vanishingPoint) {
+function estimateDashScale(frame, line, vanishingPoint, dashCycleMeters = DEFAULT_DASH_CYCLE_M) {
   const startY = Math.max(vanishingPoint.y + 20, frame.height * 0.45);
   const profile = sampleLineProfile(frame, line, startY, frame.height - 4);
   if (profile.length < 6) {
@@ -511,42 +513,112 @@ function estimateDashScale(frame, line, vanishingPoint) {
   }
 
   return {
-    metersPerPixel: DEFAULT_DASH_CYCLE_M / cyclePx,
+    metersPerPixel: dashCycleMeters / cyclePx,
+    cyclePx,
     referenceY: median(centers),
     confidence: clamp(peaks.length / 6, 0.2, 0.95),
     sampleCount: peaks.length,
   };
 }
 
-function estimateLaneSpacing(lines, referenceY) {
+function lineXAt(line, y) {
+  return line.slope * y + line.intercept;
+}
+
+function toSourcePoint(frame, point) {
+  return [point[0] / frame.scaleX, point[1] / frame.scaleY];
+}
+
+function chooseLanePair(lines, referenceY, frame, targetBox = null) {
   if (lines.length < 2) {
     return null;
   }
+  const targetX = targetBox
+    ? ((targetBox.x1 + targetBox.x2) / 2) * frame.scaleX
+    : frame.width / 2;
   const positions = lines
     .map((line) => ({
-      x: line.slope * referenceY + line.intercept,
+      line,
+      x: lineXAt(line, referenceY),
       support: line.support,
     }))
     .filter((item) => Number.isFinite(item.x))
     .sort((left, right) => left.x - right.x);
 
-  const gaps = [];
+  const pairs = [];
   for (let index = 1; index < positions.length; index += 1) {
     const gap = positions[index].x - positions[index - 1].x;
     if (gap > 14 && gap < 280) {
-      gaps.push(gap);
+      const centerX = (positions[index].x + positions[index - 1].x) / 2;
+      const containsTarget = targetX >= positions[index - 1].x && targetX <= positions[index].x;
+      pairs.push({
+        leftLine: positions[index - 1].line,
+        rightLine: positions[index].line,
+        laneSpacingPx: gap,
+        referenceY,
+        confidence: clamp((positions[index - 1].support + positions[index].support) / 12, 0.2, 0.95),
+        score:
+          (containsTarget ? 1000 : 0) +
+          positions[index - 1].support +
+          positions[index].support -
+          Math.abs(centerX - targetX) / 20,
+      });
     }
   }
 
-  if (!gaps.length) {
+  if (!pairs.length) {
     return null;
   }
 
-  return {
-    laneSpacingPx: median(gaps),
-    confidence: clamp(gaps.length / 3, 0.2, 0.9),
-    referenceY,
-  };
+  return pairs.sort((left, right) => right.score - left.score)[0];
+}
+
+function buildRoadHomography(frame, lanePair, dashScale, laneWidthMeters, dashCycleMeters, vanishingPoint) {
+  if (!lanePair || !dashScale?.cyclePx) {
+    return null;
+  }
+
+  const cyclePx = dashScale.cyclePx;
+  const minTop = Math.min(frame.height - 34, Math.max(0, vanishingPoint.y + 24));
+  const maxTop = frame.height - 24;
+  const referenceY = lanePair.referenceY || dashScale.referenceY;
+  const yTop = clamp(
+    referenceY - cyclePx / 2,
+    minTop,
+    maxTop,
+  );
+  const yBottom = clamp(
+    yTop + cyclePx,
+    yTop + Math.max(10, cyclePx * 0.35),
+    frame.height - 6,
+  );
+  const lengthMeters = dashCycleMeters * ((yBottom - yTop) / cyclePx);
+  if (!Number.isFinite(lengthMeters) || lengthMeters <= 0.5) {
+    return null;
+  }
+
+  const imagePoints = [
+    toSourcePoint(frame, [lineXAt(lanePair.leftLine, yTop), yTop]),
+    toSourcePoint(frame, [lineXAt(lanePair.rightLine, yTop), yTop]),
+    toSourcePoint(frame, [lineXAt(lanePair.rightLine, yBottom), yBottom]),
+    toSourcePoint(frame, [lineXAt(lanePair.leftLine, yBottom), yBottom]),
+  ];
+
+  if (imagePoints.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))) {
+    return null;
+  }
+
+  try {
+    return {
+      homography: computeHomography(imagePoints, laneWidthMeters, lengthMeters),
+      imagePoints,
+      lengthMeters,
+      yTop,
+      yBottom,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function estimatePcaAxis(points) {
@@ -604,6 +676,16 @@ function summarizeCalibration(base) {
     const numerator = Math.max(24, referenceY - vpY);
     return base.referenceScaleMPerPx * (numerator / denominator);
   };
+  const homography = base.homography || null;
+  const projectPoint = homography
+    ? (point) => {
+      try {
+        return projectHomographyPoint(homography, point);
+      } catch {
+        return null;
+      }
+    }
+    : () => null;
 
   return {
     method: base.method,
@@ -616,9 +698,14 @@ function summarizeCalibration(base) {
     },
     referenceY,
     laneSpacingPx: base.laneSpacingPx ? base.laneSpacingPx / scaleX : null,
-    referenceScaleMPerPx: base.referenceScaleMPerPx * scaleX,
+    referenceScaleMPerPx: base.referenceScaleMPerPx ? base.referenceScaleMPerPx * scaleX : null,
     laneWidthMeters: base.laneWidthMeters,
     dashCycleMeters: base.dashCycleMeters,
+    dashCyclePx: base.dashCyclePx ? base.dashCyclePx / scaleY : null,
+    homography,
+    homographyPoints: base.homographyPoints || null,
+    projectedLengthMeters: base.projectedLengthMeters || null,
+    projectPoint,
     scaleAtY,
   };
 }
@@ -661,6 +748,7 @@ export function estimateRoadCalibration(samples, options = {}) {
         sourceHeight: 1,
         scaleX: 1,
         scaleY: 1,
+        projectPoint: () => null,
         scaleAtY: () => null,
       };
     }
@@ -693,14 +781,25 @@ export function estimateRoadCalibration(samples, options = {}) {
   const vanishingPoint = estimateVanishingPoint(lines, bestFrame.frame.width, bestFrame.frame.height);
   const roadAxisLine = lines[0];
   const roadAxis = roadAxisLine?.direction || [0, 1];
+  const targetReferenceY = options.targetBox?.y2
+    ? options.targetBox.y2 * bestFrame.frame.scaleY
+    : null;
   const referenceY = clamp(
-    options.referenceY || bestFrame.frame.height * 0.78,
+    options.referenceY || targetReferenceY || bestFrame.frame.height * 0.78,
     vanishingPoint.y + 28,
     bestFrame.frame.height - 20,
   );
 
-  const laneSpacing = estimateLaneSpacing(lines, referenceY);
-  const dashScale = estimateDashScale(bestFrame.frame, roadAxisLine, vanishingPoint);
+  const laneSpacing = chooseLanePair(lines, referenceY, bestFrame.frame, options.targetBox || null);
+  const dashScale = estimateDashScale(bestFrame.frame, roadAxisLine, vanishingPoint, dashCycleMeters);
+  const roadPlane = buildRoadHomography(
+    bestFrame.frame,
+    laneSpacing,
+    dashScale,
+    laneWidthMeters,
+    dashCycleMeters,
+    vanishingPoint,
+  );
 
   let referenceScaleMPerPx = null;
   let scaleConfidence = 0;
@@ -747,7 +846,7 @@ export function estimateRoadCalibration(samples, options = {}) {
   }
 
   if (laneSpacing && dashScale) {
-    method = "lane-marking + road-edge";
+    method = roadPlane ? "lane homography" : "lane-marking + road-edge";
   } else if (laneSpacing) {
     method = "lane-marking + road-edge";
   } else if (dashScale) {
@@ -768,6 +867,10 @@ export function estimateRoadCalibration(samples, options = {}) {
     referenceScaleMPerPx,
     laneWidthMeters,
     dashCycleMeters,
+    dashCyclePx: dashScale?.cyclePx || null,
+    homography: roadPlane?.homography || null,
+    homographyPoints: roadPlane?.imagePoints || null,
+    projectedLengthMeters: roadPlane?.lengthMeters || null,
     sourceWidth: bestFrame.frame.sourceWidth,
     sourceHeight: bestFrame.frame.sourceHeight,
     scaleX: bestFrame.frame.scaleX,

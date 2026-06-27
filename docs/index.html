@@ -62,27 +62,34 @@
                   <input id="speed-limit" type="number" min="1" step="1" value="35">
                 </label>
                 <label>
-                  <span>Confidence threshold</span>
-                  <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
+                  <span>Reported speed (mph)</span>
+                  <input id="reported-speed" type="number" min="0" step="1" value="0">
                 </label>
               </div>
 
               <div class="grid two">
+                <label>
+                  <span>Confidence threshold</span>
+                  <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
+                </label>
                 <label>
                   <span>Smoothing window (seconds)</span>
                   <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
                 </label>
-                <label>
-                  <span>Video FPS</span>
-                  <input id="fps-override" type="number" min="1" step="1" value="30">
-                </label>
               </div>
 
               <div class="grid two">
                 <label>
+                  <span>Video FPS</span>
+                  <input id="fps-override" type="number" min="1" step="1" value="30">
+                </label>
+                <label>
                   <span>Sample every N frames</span>
                   <input id="sample-every-frames" type="number" min="1" step="1" value="3">
                 </label>
+              </div>
+
+              <div class="grid two">
                 <label>
                   <span>Inference engine</span>
                   <input id="engine-text" type="text" value="Model not loaded yet" readonly>
