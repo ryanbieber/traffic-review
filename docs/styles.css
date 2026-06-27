@@ -224,6 +224,11 @@ h1 {
 #selection-text {
   color: var(--accent);
   font-weight: 700;
+  background: rgba(180, 67, 47, 0.09);
+  border: 1px solid rgba(180, 67, 47, 0.18);
+  border-radius: 999px;
+  padding: 6px 10px;
+  width: fit-content;
 }
 
 .layout {

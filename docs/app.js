@@ -4,7 +4,7 @@ import {
   getHistorySeconds,
   getSpeedLimitMph,
 } from "./lib/settings.js";
-import { estimateRoadAxis } from "./lib/perspective.js";
+import { estimateRoadCalibration } from "./lib/perspective.js";
 import { transcodeToBrowserVideo } from "./lib/transcode.js";
 import { createYoloDetector } from "./lib/yolo.js";
 
@@ -54,7 +54,7 @@ const appState = {
   selectionFrame: null,
   selectionSamples: [],
   selectedTarget: null,
-  roadAxis: null,
+  roadCalibration: null,
   decodeMode: "idle",
   mode: "idle",
 };
@@ -154,12 +154,21 @@ function drawPreview(frameSource = null, annotations = null, selectedTrackId = n
   }
 
   context.font = "600 18px IBM Plex Mono";
+  const hasSelection = selectedTrackId !== null;
   annotations.forEach((item) => {
     const isSelected = selectedTrackId !== null && item.trackId === selectedTrackId;
     const color = isSelected ? "#b4432f" : "#204f44";
+    const faded = hasSelection && !isSelected;
+    if (isSelected) {
+      context.shadowColor = "rgba(180, 67, 47, 0.5)";
+      context.shadowBlur = 14;
+      context.shadowOffsetX = 0;
+      context.shadowOffsetY = 0;
+    }
     context.strokeStyle = color;
-    context.fillStyle = isSelected ? "rgba(180, 67, 47, 0.14)" : "rgba(32, 79, 68, 0.06)";
-    context.lineWidth = isSelected ? 6 : 3;
+    context.globalAlpha = faded ? 0.28 : 1;
+    context.fillStyle = isSelected ? "rgba(180, 67, 47, 0.18)" : "rgba(32, 79, 68, 0.08)";
+    context.lineWidth = isSelected ? 7 : 3;
     if (isSelected) {
       context.fillRect(item.box.x1, item.box.y1, item.box.x2 - item.box.x1, item.box.y2 - item.box.y1);
     }
@@ -173,6 +182,15 @@ function drawPreview(frameSource = null, annotations = null, selectedTrackId = n
     context.fillRect(item.box.x1, Math.max(0, item.box.y1 - 28), context.measureText(text).width + 18, 24);
     context.fillStyle = "#fff";
     context.fillText(text, item.box.x1 + 8, Math.max(18, item.box.y1 - 10));
+    if (isSelected) {
+      context.fillStyle = "rgba(180, 67, 47, 0.92)";
+      context.fillRect(item.box.x1, item.box.y2 + 6, 98, 24);
+      context.fillStyle = "#fff";
+      context.fillText("SELECTED", item.box.x1 + 8, item.box.y2 + 24);
+      context.shadowBlur = 0;
+      context.shadowColor = "transparent";
+    }
+    context.globalAlpha = 1;
   });
 }
 
@@ -333,15 +351,15 @@ async function estimateFps(video) {
 
 function chooseSamplingStep(fps) {
   if (fps >= 50) {
-    return 5;
+    return 90;
   }
   if (fps >= 30) {
-    return 3;
+    return 60;
   }
   if (fps >= 20) {
-    return 2;
+    return 45;
   }
-  return 1;
+  return 30;
 }
 
 function getMetersPerPixel(detection) {
@@ -351,12 +369,14 @@ function getMetersPerPixel(detection) {
 }
 
 function measureDetection(detection) {
+  const anchorY = detection.box.y2;
+  const calibratedScale = appState.roadCalibration?.scaleAtY?.(anchorY);
   return {
     anchorPoint: [
       (detection.box.x1 + detection.box.x2) / 2,
-      detection.box.y2,
+      anchorY,
     ],
-    metersPerPixel: getMetersPerPixel(detection),
+    metersPerPixel: calibratedScale && Number.isFinite(calibratedScale) ? calibratedScale : getMetersPerPixel(detection),
   };
 }
 
@@ -438,12 +458,14 @@ function renderSampleGallery() {
     .join("");
 }
 
-function buildSampleTimes(duration, fps, step, selectionTimeS) {
+function buildSampleTimes(duration, fps, step, selectionTimeS, analysisWindowSeconds = 2.5) {
   const times = [];
   const samplePeriodS = step / fps;
-  const sampleCount = Math.max(1, Math.ceil(duration / samplePeriodS));
+  const startTimeS = Math.max(0, Math.min(selectionTimeS, Math.max(0, duration - 0.001)));
+  const endTimeS = Math.min(Math.max(0, duration - 0.001), startTimeS + analysisWindowSeconds);
+  const sampleCount = Math.min(3, Math.max(1, Math.ceil(Math.max(0.001, endTimeS - startTimeS) / samplePeriodS)));
   for (let index = 0; index < sampleCount; index += 1) {
-    times.push(Number(Math.min(index * samplePeriodS, Math.max(0, duration - 0.001)).toFixed(3)));
+    times.push(Number(Math.min(startTimeS + index * samplePeriodS, endTimeS).toFixed(3)));
   }
   times.push(Number(selectionTimeS.toFixed(3)));
   return [...new Set(times)].sort((left, right) => left - right);
@@ -484,7 +506,7 @@ async function analyzeSelectedVehicle() {
     historySeconds: getHistorySeconds(),
     speedLimitMph: getSpeedLimitMph(),
     speedUnit: "mph",
-    roadAxis: appState.roadAxis?.axis || null,
+    roadAxis: appState.roadCalibration?.axis || null,
   });
 
   const video = appState.sourceVideo;
@@ -500,7 +522,8 @@ async function analyzeSelectedVehicle() {
   );
 
   let selectedTrackId = null;
-  const allSamples = [];
+  const annotatedSamples = [];
+  const trackScores = new Map();
 
   for (let index = 0; index < sampleTimes.length; index += 1) {
     const timeS = sampleTimes[index];
@@ -508,6 +531,17 @@ async function analyzeSelectedVehicle() {
     frameContext.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
     const detections = await detector.infer(frameCanvas, getConfidenceThreshold());
     const annotated = tracker.update(detections, timeS, measureDetection);
+    annotatedSamples.push({
+      timeS,
+      detections: annotated.map((item) => ({ ...item })),
+    });
+
+    for (const item of annotated) {
+      const overlap = boxesOverlap(item.box, appState.selectedTarget.box);
+      const existing = trackScores.get(item.trackId) || 0;
+      const timeBonus = 1 - Math.min(1, Math.abs(timeS - appState.selectionFrame.timeS) / 4);
+      trackScores.set(item.trackId, existing + overlap * (0.75 + timeBonus * 0.25));
+    }
 
     if (selectedTrackId === null && Math.abs(timeS - appState.selectionFrame.timeS) < 0.002) {
       let bestMatch = null;
@@ -524,23 +558,26 @@ async function analyzeSelectedVehicle() {
       }
     }
 
-    const filtered = selectedTrackId === null
-      ? []
-      : annotated.filter((item) => item.trackId === selectedTrackId);
-
-    allSamples.push({
-      timeS,
-      detections: filtered,
-    });
-
-    drawPreview(frameCanvas, filtered, selectedTrackId);
+    drawPreview(frameCanvas, annotated, selectedTrackId);
     setStatus(`Processed ${index + 1}/${sampleTimes.length} sampled frames.`);
     setProgress((index + 1) / sampleTimes.length);
+  }
+
+  if (selectedTrackId === null && trackScores.size) {
+    const bestCandidate = [...trackScores.entries()].sort((left, right) => right[1] - left[1])[0];
+    if (bestCandidate && bestCandidate[1] > 0.08) {
+      selectedTrackId = bestCandidate[0];
+    }
   }
 
   if (selectedTrackId === null) {
     throw new Error("The selected vehicle could not be linked to a stable track across the clip.");
   }
+
+  const allSamples = annotatedSamples.map((sample) => ({
+    timeS: sample.timeS,
+    detections: sample.detections.filter((item) => item.trackId === selectedTrackId),
+  }));
 
   const summary = tracker.getSummaryRows().filter((row) => row.track_id === selectedTrackId);
   const frameMetrics = allSamples.map((sample) => {
@@ -569,15 +606,22 @@ async function analyzeSelectedVehicle() {
     frameMetrics,
     samples: allSamples,
     note:
-      "This tracks only the vehicle you clicked. Speeds are rough estimates from screen motion plus assumed vehicle width, not calibrated road speed.",
+      "This tracks only the vehicle you clicked. Speeds are estimated from the selected frame sequence using lane-marking geometry when available, with a vehicle-width fallback if the markings are weak.",
   };
 
   elements.metricVehicles.textContent = summary.length ? "1" : "0";
   elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
   elements.metricAvg.textContent = `${avgObserved.toFixed(1)} mph`;
   elements.calibrationText.textContent = "Auto rough scale from selected vehicle width";
-  if (appState.roadAxis) {
-    elements.calibrationText.textContent = `Road axis ${appState.roadAxis.angleDeg.toFixed(0)}° from sampled detections`;
+  if (appState.roadCalibration) {
+    const details = appState.roadCalibration.method.includes("lane")
+      ? "Lane markings and road edge"
+      : "Road axis";
+    elements.calibrationText.textContent = `${details} ${appState.roadCalibration.angleDeg.toFixed(0)}° • ${
+      appState.roadCalibration.referenceScaleMPerPx
+        ? `${(appState.roadCalibration.referenceScaleMPerPx * 3.28084).toFixed(3)} ft/px at reference row`
+        : "scale fallback"
+    }`;
   }
   elements.noteText.textContent = appState.analysis.note;
 
@@ -715,7 +759,7 @@ async function prepareSelection(file) {
   const detector = await ensureDetector();
   setStatus("Scanning the clip for visible vehicles.");
   appState.selectionSamples = await findSelectionFrame(appState.sourceVideo, detector);
-  appState.roadAxis = estimateRoadAxis(appState.selectionSamples);
+  appState.roadCalibration = estimateRoadCalibration(appState.selectionSamples);
   appState.selectionFrame = appState.selectionSamples[0];
   appState.selectedTarget = null;
   appState.mode = "select-target";
@@ -724,8 +768,8 @@ async function prepareSelection(file) {
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, null);
   elements.noteText.textContent = "Choose a sampled frame, click the vehicle, then analyze it.";
   elements.selectionText.textContent = "Selected vehicle: none";
-  elements.calibrationText.textContent = appState.roadAxis
-    ? `Road axis ${appState.roadAxis.angleDeg.toFixed(0)}° inferred from sample frames`
+  elements.calibrationText.textContent = appState.roadCalibration
+    ? `Lane-marking calibration ${appState.roadCalibration.angleDeg.toFixed(0)}° from sample frames`
     : "Automatic scale from vehicle width";
   setStatus("Choose a sample frame, then click the vehicle you want to track.");
 }
