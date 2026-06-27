@@ -465,16 +465,21 @@ async function estimateFps(video) {
 }
 
 function chooseSamplingStep(fps) {
-  if (fps >= 50) {
-    return 90;
+  return 1;
+}
+
+function buildFrameTimes(duration, fps) {
+  const safeFps = Math.max(1, fps);
+  const frameStepS = 1 / safeFps;
+  const frameCount = Math.max(1, Math.ceil(duration * safeFps));
+  const endTimeS = Math.max(0, duration - 0.001);
+  const times = [];
+
+  for (let index = 0; index < frameCount; index += 1) {
+    times.push(Number(Math.min(index * frameStepS, endTimeS).toFixed(3)));
   }
-  if (fps >= 30) {
-    return 60;
-  }
-  if (fps >= 20) {
-    return 45;
-  }
-  return 30;
+
+  return [...new Set(times)].sort((left, right) => left - right);
 }
 
 function getMetersPerPixel(detection) {
@@ -632,22 +637,17 @@ async function analyzeSelectedVehicle() {
   frameCanvas.width = video.videoWidth;
   frameCanvas.height = video.videoHeight;
   const frameContext = frameCanvas.getContext("2d");
-  const sampleTimes = buildSampleTimes(
-    video.duration,
-    appState.estimatedFps,
-    appState.sampleEveryFrames,
-    appState.selectionFrame.timeS,
-  );
+  const frameTimes = buildFrameTimes(video.duration, appState.estimatedFps);
 
   let selectedTrackId = null;
   const annotatedSamples = [];
   const trackScores = new Map();
 
-  for (let index = 0; index < sampleTimes.length; index += 1) {
+  for (let index = 0; index < frameTimes.length; index += 1) {
     if (appState.cancelAnalysis) {
       throw new Error("Analysis canceled.");
     }
-    const timeS = sampleTimes[index];
+    const timeS = frameTimes[index];
     await seekVideo(video, timeS);
     if (appState.cancelAnalysis) {
       throw new Error("Analysis canceled.");
@@ -686,8 +686,8 @@ async function analyzeSelectedVehicle() {
     }
 
     drawPreview(frameCanvas, annotated, selectedTrackId);
-    setStatus(`Processed ${index + 1}/${sampleTimes.length} sampled frames.`);
-    setProgress((index + 1) / sampleTimes.length);
+    setStatus(`Processed ${index + 1}/${frameTimes.length} frames.`);
+    setProgress((index + 1) / frameTimes.length);
   }
 
   if (selectedTrackId === null && trackScores.size) {
@@ -701,12 +701,22 @@ async function analyzeSelectedVehicle() {
     throw new Error("The selected vehicle could not be linked to a stable track across the clip.");
   }
 
-  const allSamples = annotatedSamples.map((sample) => ({
-    timeS: sample.timeS,
-    detections: sample.detections.filter((item) => item.trackId === selectedTrackId),
-  }));
+  const summaryRows = tracker.getSummaryRows();
+  const summary = summaryRows.filter((row) => row.track_id === selectedTrackId);
+  const selectedSummary = summary[0] || null;
+  const trackWindowStartS = selectedSummary
+    ? Math.max(0, selectedSummary.first_seen_s - (1 / Math.max(1, appState.estimatedFps)))
+    : 0;
+  const trackWindowEndS = selectedSummary
+    ? selectedSummary.last_seen_s + (1 / Math.max(1, appState.estimatedFps))
+    : video.duration;
+  const allSamples = annotatedSamples
+    .filter((sample) => sample.timeS >= trackWindowStartS && sample.timeS <= trackWindowEndS)
+    .map((sample) => ({
+      timeS: sample.timeS,
+      detections: sample.detections.filter((item) => item.trackId === selectedTrackId),
+    }));
 
-  const summary = tracker.getSummaryRows().filter((row) => row.track_id === selectedTrackId);
   const worldPoints = allSamples
     .flatMap((sample) => sample.detections.map((item) => item.worldPoint))
     .filter((point) => Array.isArray(point) && point.every(Number.isFinite));
@@ -759,6 +769,13 @@ async function analyzeSelectedVehicle() {
       }
       : null,
     samples: allSamples,
+    fullFrameCount: frameTimes.length,
+    trackWindow: selectedSummary
+      ? {
+        start_s: selectedSummary.first_seen_s,
+        end_s: selectedSummary.last_seen_s,
+      }
+      : null,
     note:
       "This tracks only the vehicle you clicked. Reported speed is shown only for comparison and is not used to calibrate the estimate.",
   };
@@ -770,6 +787,9 @@ async function analyzeSelectedVehicle() {
   elements.resultsNoteText.textContent = reportedSpeedMph > 0
     ? `${appState.analysis.note} Peak differs from reported by ${speedDeltaMph?.toFixed(1) ?? "n/a"} mph.`
     : appState.analysis.note;
+  if (selectedSummary) {
+    elements.resultsNoteText.textContent += ` Track window: ${selectedSummary.first_seen_s.toFixed(2)}s to ${selectedSummary.last_seen_s.toFixed(2)}s.`;
+  }
   setResultsStatus("Analysis complete. Build the final annotated WebM below.");
 
   renderSummaryTable(summary);
@@ -810,7 +830,7 @@ async function replayAnnotated() {
     return;
   }
   appState.replaying = true;
-  const frameDelay = (appState.sampleEveryFrames / appState.estimatedFps) * 1000;
+  const frameDelay = (1 / Math.max(1, appState.estimatedFps)) * 1000;
   for (const sample of appState.analysis.samples) {
     if (!appState.replaying) {
       break;
@@ -829,7 +849,7 @@ async function exportAnnotatedVideo() {
     return;
   }
   const canvas = elements.previewCanvas;
-  const stream = canvas.captureStream(Math.max(1, appState.estimatedFps / appState.sampleEveryFrames));
+  const stream = canvas.captureStream(Math.max(1, appState.estimatedFps));
   const chunks = [];
   const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
   recorder.ondataavailable = (event) => {
@@ -842,7 +862,7 @@ async function exportAnnotatedVideo() {
   });
   recorder.start();
 
-  const frameDelay = (appState.sampleEveryFrames / appState.estimatedFps) * 1000;
+  const frameDelay = (1 / Math.max(1, appState.estimatedFps)) * 1000;
   for (const sample of appState.analysis.samples) {
     await seekVideo(appState.sourceVideo, sample.timeS);
     drawPreview(null, sample.detections, appState.analysis.selectedTrackId);

@@ -99,14 +99,6 @@ async function main() {
       return button && !button.classList.contains("disabled");
     }, { timeout: 180000 });
 
-    await page.evaluate(() => {
-      window.__trafficReview.sampleEveryFrames = 12;
-      const input = document.querySelector("#sample-every-frames");
-      if (input) {
-        input.value = "12";
-      }
-    });
-
     await page.click("#analyze-button");
 
     await page.waitForFunction(() => {
