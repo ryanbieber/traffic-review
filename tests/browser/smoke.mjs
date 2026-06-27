@@ -63,7 +63,7 @@ async function main() {
 
     console.log("Waiting for target-pick prompt");
     await page.waitForFunction(() => {
-      const status = document.querySelector("#status-text");
+      const status = document.querySelector("#track-status-text");
       return status && /click the vehicle/i.test(status.textContent);
     }, { timeout: 180000 });
 
@@ -110,9 +110,24 @@ async function main() {
     await page.click("#analyze-button");
 
     await page.waitForFunction(() => {
-      const status = document.querySelector("#status-text");
+      const status = document.querySelector("#track-status-text");
       return status && /analyzing/i.test(status.textContent);
     }, { timeout: 30000 });
+
+    await page.waitForFunction(() => {
+      const status = document.querySelector("#results-status-text");
+      return status && /analysis complete/i.test(status.textContent);
+    }, { timeout: 180000 });
+
+    const activeStage = await page.$eval("#stage-results", (node) => node.classList.contains("active"));
+    assert.ok(activeStage);
+
+    await page.click("#build-video-button");
+
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#annotated-video");
+      return video && video.src && video.src.length > 0;
+    }, { timeout: 180000 });
 
     const selectedTarget = await page.evaluate(() => window.__trafficReview.selectedTarget);
     assert.ok(selectedTarget);

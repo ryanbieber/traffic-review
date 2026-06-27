@@ -25,184 +25,235 @@
         </div>
       </header>
 
-      <main class="layout">
-        <section class="card upload-card">
+      <nav class="stage-rail" aria-label="Workflow stages">
+        <button type="button" class="stage-chip active" data-stage-target="load">1 Load</button>
+        <button type="button" class="stage-chip" data-stage-target="pick">2 Pick</button>
+        <button type="button" class="stage-chip" data-stage-target="analyze">3 Analyze</button>
+        <button type="button" class="stage-chip" data-stage-target="results">4 Results</button>
+      </nav>
+
+      <main class="workflow">
+        <section id="stage-load" class="card stage-pane">
           <div class="section-head">
-            <h2>Load a clip</h2>
-            <p>Use the built-in demo or choose your own file.</p>
+            <h2>Load</h2>
+            <p>Open a clip, keep the controls compact, and move to the selection stage once the file is ready.</p>
           </div>
 
-          <form id="analysis-form">
-            <div class="action-row">
-              <button id="demo-button" type="button" class="primary-btn">Load demo clip</button>
-              <button id="analyze-button" type="button" class="primary-btn disabled">Analyze selected vehicle</button>
+          <form id="analysis-form" class="stage-grid">
+            <div class="stage-column">
+              <div class="action-row">
+                <button id="demo-button" type="button" class="primary-btn">Load demo clip</button>
+              </div>
+
+              <div id="sample-picker" class="sample-picker"></div>
+
+              <div id="drop-zone" class="drop-zone compact">
+                <strong>Drop video here</strong>
+              </div>
+
+              <label class="file-field">
+                <span>Or choose a file</span>
+                <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
+              </label>
+
+              <details class="advanced">
+                <summary>Advanced settings</summary>
+                <div class="grid two">
+                  <label>
+                    <span>Speed limit (mph)</span>
+                    <input id="speed-limit" type="number" min="1" step="1" value="35">
+                  </label>
+                  <label>
+                    <span>Reported speed (mph)</span>
+                    <input id="reported-speed" type="number" min="0" step="1" value="0">
+                  </label>
+                </div>
+
+                <div class="grid two">
+                  <label>
+                    <span>Confidence threshold</span>
+                    <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
+                  </label>
+                  <label>
+                    <span>Smoothing window (seconds)</span>
+                    <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
+                  </label>
+                </div>
+
+                <div class="grid two">
+                  <label>
+                    <span>Video FPS</span>
+                    <input id="fps-override" type="number" min="1" step="1" value="30">
+                  </label>
+                  <label>
+                    <span>Sample every N frames</span>
+                    <input id="sample-every-frames" type="number" min="1" step="1" value="3">
+                  </label>
+                </div>
+
+                <div class="grid two">
+                  <label>
+                    <span>Inference engine</span>
+                    <input id="engine-text" type="text" value="Model not loaded yet" readonly>
+                  </label>
+                </div>
+              </details>
             </div>
 
-            <div id="sample-picker" class="sample-picker"></div>
+            <div class="stage-column stage-preview-column">
+              <div class="section-head compact">
+                <h3>Loaded clip</h3>
+                <p>Confirm the source before moving on.</p>
+              </div>
 
-            <div id="drop-zone" class="drop-zone compact">
-              <strong>Drop video here</strong>
-            </div>
-
-            <div class="preview-shell">
               <video id="source-video" class="source-video" controls muted playsinline></video>
-              <canvas id="preview-canvas" width="960" height="540"></canvas>
-            <div class="preview-meta">
-              <span id="video-meta">No clip loaded</span>
-              <span id="decode-text">Source: not loaded</span>
-              <span id="selection-text">Selected vehicle: none</span>
-            </div>
-          </div>
-
-            <details class="advanced">
-              <summary>Advanced settings</summary>
-              <div class="grid two">
-                <label>
-                  <span>Speed limit (mph)</span>
-                  <input id="speed-limit" type="number" min="1" step="1" value="35">
-                </label>
-                <label>
-                  <span>Reported speed (mph)</span>
-                  <input id="reported-speed" type="number" min="0" step="1" value="0">
-                </label>
+              <div class="preview-meta">
+                <span id="video-meta">No clip loaded</span>
+                <span id="decode-text">Source: not loaded</span>
               </div>
-
-              <div class="grid two">
-                <label>
-                  <span>Confidence threshold</span>
-                  <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
-                </label>
-                <label>
-                  <span>Smoothing window (seconds)</span>
-                  <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
-                </label>
-              </div>
-
-              <div class="grid two">
-                <label>
-                  <span>Video FPS</span>
-                  <input id="fps-override" type="number" min="1" step="1" value="30">
-                </label>
-                <label>
-                  <span>Sample every N frames</span>
-                  <input id="sample-every-frames" type="number" min="1" step="1" value="3">
-                </label>
-              </div>
-
-              <div class="grid two">
-                <label>
-                  <span>Inference engine</span>
-                  <input id="engine-text" type="text" value="Model not loaded yet" readonly>
-                </label>
-              </div>
-            </details>
-
-            <label class="file-field">
-              <span>Or choose a file</span>
-              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
-            </label>
-
-            <div class="section-head compact">
-              <h3>Pick the car</h3>
-              <p>Choose a sample frame, click the vehicle, then analyze it.</p>
-            </div>
-
-            <div id="sample-gallery" class="sample-gallery">
-              <p class="sample-placeholder">No sampled frames yet.</p>
             </div>
           </form>
         </section>
+
+        <section id="stage-track" class="card stage-pane">
+          <div class="section-head">
+            <h2 id="track-title">Pick the car</h2>
+            <p id="track-subtitle">Choose a sampled frame, click the vehicle, then analyze it.</p>
+          </div>
+
+          <div class="stage-actions">
+            <button id="track-back-button" type="button" class="ghost-btn">Back to load</button>
+            <button id="analyze-button" type="button" class="primary-btn disabled">Analyze selected vehicle</button>
+          </div>
+
+          <div class="stage-grid">
+            <div class="stage-column">
+              <div class="preview-shell">
+                <canvas id="preview-canvas" width="960" height="540"></canvas>
+              </div>
+
+              <div class="preview-meta">
+                <span id="selection-text">Selected vehicle: none</span>
+                <span id="track-calibration-text">Not available yet.</span>
+                <span id="track-status-text">Load a clip to start.</span>
+              </div>
+
+              <div class="progress-track">
+                <div id="progress-bar"></div>
+              </div>
+            </div>
+
+            <div class="stage-column">
+              <div class="section-head compact">
+                <h3>Pick the car</h3>
+                <p>Choose a sample frame, then click the vehicle you want to track.</p>
+              </div>
+
+              <div id="sample-gallery" class="sample-gallery">
+                <p class="sample-placeholder">No sampled frames yet.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="stage-results" class="card stage-pane">
+          <div class="section-head">
+            <h2>Results</h2>
+            <p id="results-status-text">Waiting for analysis.</p>
+          </div>
+
+          <div class="result-meta">
+            <div>
+              <span class="meta-label">Scale Method</span>
+              <p id="results-calibration-text">Not available yet.</p>
+            </div>
+            <div>
+              <span class="meta-label">Review note</span>
+              <p id="results-note-text">Not available yet.</p>
+            </div>
+          </div>
+
+          <div class="stage-actions">
+            <button id="results-back-button" type="button" class="ghost-btn">Back to pick</button>
+            <button id="build-video-button" type="button" class="primary-btn">Build annotated WebM</button>
+          </div>
+
+          <div class="results-media">
+            <video id="annotated-video" class="source-video" controls playsinline></video>
+            <div class="preview-meta">
+              <span id="annotated-video-text">Final annotated WebM will appear here.</span>
+            </div>
+          </div>
+
+          <div class="metric-grid">
+            <div class="metric-card">
+              <span class="meta-label">Tracked Vehicles</span>
+              <strong id="metric-vehicles">0</strong>
+            </div>
+            <div class="metric-card">
+              <span class="meta-label">Peak Observed</span>
+              <strong id="metric-peak">0.0 mph</strong>
+            </div>
+            <div class="metric-card">
+              <span class="meta-label">Average Observed</span>
+              <strong id="metric-avg">0.0 mph</strong>
+            </div>
+          </div>
+
+          <div class="actions">
+            <a id="download-csv" class="ghost-btn disabled" href="#">Summary CSV</a>
+            <a id="download-json" class="ghost-btn disabled" href="#">Analysis JSON</a>
+            <a id="export-video" class="ghost-btn disabled" href="#">Download final WebM</a>
+            <button id="replay-button" class="ghost-btn disabled" type="button">Replay Review</button>
+          </div>
+
+          <div class="table-wrap">
+            <table id="results-table">
+              <thead>
+                <tr>
+                  <th>Track</th>
+                  <th>Label</th>
+                  <th>Peak mph</th>
+                  <th>Avg mph</th>
+                  <th>Frames</th>
+                  <th>Seen from</th>
+                  <th>Seen to</th>
+                  <th>Flagged</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="8">No results yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section-head compact">
+            <h3>Per-Frame Metrics</h3>
+            <p>Each row represents a sampled frame in the browser analysis loop.</p>
+          </div>
+
+          <div class="table-wrap">
+            <table id="frame-results-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Vehicles</th>
+                  <th>Avg Speed</th>
+                  <th>Max Speed</th>
+                  <th>Tracks</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="5">No frame metrics yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </main>
-
-      <section class="card results-card">
-        <div class="section-head">
-          <h2>Results</h2>
-          <p id="status-text">Load the demo clip or upload a file.</p>
-        </div>
-
-        <div class="result-meta">
-          <div>
-            <span class="meta-label">Scale Method</span>
-            <p id="calibration-text">Not available yet.</p>
-          </div>
-          <div>
-            <span class="meta-label">Review note</span>
-            <p id="note-text">Not available yet.</p>
-          </div>
-        </div>
-
-        <div class="metric-grid">
-          <div class="metric-card">
-            <span class="meta-label">Tracked Vehicles</span>
-            <strong id="metric-vehicles">0</strong>
-          </div>
-          <div class="metric-card">
-            <span class="meta-label">Peak Observed</span>
-            <strong id="metric-peak">0.0 mph</strong>
-          </div>
-          <div class="metric-card">
-            <span class="meta-label">Average Observed</span>
-            <strong id="metric-avg">0.0 mph</strong>
-          </div>
-        </div>
-
-        <div class="actions">
-          <a id="download-csv" class="ghost-btn disabled" href="#">Summary CSV</a>
-          <a id="download-json" class="ghost-btn disabled" href="#">Analysis JSON</a>
-          <a id="export-video" class="ghost-btn disabled" href="#">Annotated WebM</a>
-          <button id="replay-button" class="ghost-btn disabled" type="button">Replay Review</button>
-        </div>
-
-        <div class="progress-track">
-          <div id="progress-bar"></div>
-        </div>
-
-        <div class="table-wrap">
-          <table id="results-table">
-            <thead>
-              <tr>
-                <th>Track</th>
-                <th>Label</th>
-                <th>Peak mph</th>
-                <th>Avg mph</th>
-                <th>Frames</th>
-                <th>Seen from</th>
-                <th>Seen to</th>
-                <th>Flagged</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colspan="8">No results yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="section-head compact">
-          <h3>Per-Frame Metrics</h3>
-          <p>Each row represents a sampled frame in the browser analysis loop.</p>
-        </div>
-
-        <div class="table-wrap">
-          <table id="frame-results-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Vehicles</th>
-                <th>Avg Speed</th>
-                <th>Max Speed</th>
-                <th>Tracks</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colspan="5">No frame metrics yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
 
     <script src="./app.js" type="module"></script>

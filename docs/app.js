@@ -17,18 +17,31 @@ const ASSUMED_WIDTHS_M = {
 };
 
 const elements = {
+  stageButtons: [...document.querySelectorAll("[data-stage-target]")],
+  loadStage: document.querySelector("#stage-load"),
+  trackStage: document.querySelector("#stage-track"),
+  resultsStage: document.querySelector("#stage-results"),
+  trackTitle: document.querySelector("#track-title"),
+  trackSubtitle: document.querySelector("#track-subtitle"),
+  trackBackButton: document.querySelector("#track-back-button"),
+  resultsBackButton: document.querySelector("#results-back-button"),
+  buildVideoButton: document.querySelector("#build-video-button"),
   demoButton: document.querySelector("#demo-button"),
   analyzeButton: document.querySelector("#analyze-button"),
   samplePicker: document.querySelector("#sample-picker"),
   sourceVideo: document.querySelector("#source-video"),
+  annotatedVideo: document.querySelector("#annotated-video"),
+  annotatedVideoText: document.querySelector("#annotated-video-text"),
   fileInput: document.querySelector("#video-file"),
   dropZone: document.querySelector("#drop-zone"),
   previewCanvas: document.querySelector("#preview-canvas"),
   sampleGallery: document.querySelector("#sample-gallery"),
-  statusText: document.querySelector("#status-text"),
+  trackStatusText: document.querySelector("#track-status-text"),
+  resultsStatusText: document.querySelector("#results-status-text"),
   engineText: document.querySelector("#engine-text"),
-  noteText: document.querySelector("#note-text"),
-  calibrationText: document.querySelector("#calibration-text"),
+  resultsNoteText: document.querySelector("#results-note-text"),
+  trackCalibrationText: document.querySelector("#track-calibration-text"),
+  resultsCalibrationText: document.querySelector("#results-calibration-text"),
   summaryTableBody: document.querySelector("#results-table tbody"),
   frameTableBody: document.querySelector("#frame-results-table tbody"),
   progressBar: document.querySelector("#progress-bar"),
@@ -56,8 +69,11 @@ const appState = {
   selectionSamples: [],
   selectedTarget: null,
   roadCalibration: null,
+  annotatedVideoUrl: null,
   decodeMode: "idle",
   mode: "idle",
+  stage: "load",
+  cancelAnalysis: false,
 };
 
 const SAMPLE_CLIPS = [
@@ -81,11 +97,25 @@ const SAMPLE_CLIPS = [
 window.__trafficReview = appState;
 
 function setStatus(text) {
-  elements.statusText.textContent = text;
+  elements.trackStatusText.textContent = text;
 }
 
 function setProgress(value) {
   elements.progressBar.style.width = `${Math.max(0, Math.min(100, value * 100))}%`;
+}
+
+function setResultsStatus(text) {
+  elements.resultsStatusText.textContent = text;
+}
+
+function revokeAnnotatedVideo() {
+  if (appState.annotatedVideoUrl) {
+    URL.revokeObjectURL(appState.annotatedVideoUrl);
+    appState.annotatedVideoUrl = null;
+  }
+  elements.annotatedVideo.removeAttribute("src");
+  elements.annotatedVideo.load();
+  elements.annotatedVideoText.textContent = "Final annotated WebM will appear here.";
 }
 
 function clearDownloads() {
@@ -100,18 +130,79 @@ function setAnalyzeButtonEnabled(enabled) {
   elements.analyzeButton.disabled = !enabled;
 }
 
+function canEnterStage(stage) {
+  if (stage === "load") {
+    return true;
+  }
+  if (stage === "pick") {
+    return Boolean(appState.sourceVideo);
+  }
+  if (stage === "analyze") {
+    return Boolean(appState.selectionFrame && appState.selectedTarget);
+  }
+  if (stage === "results") {
+    return Boolean(appState.analysis);
+  }
+  return false;
+}
+
+function setStage(stage, { force = false } = {}) {
+  if (!force && !canEnterStage(stage)) {
+    return;
+  }
+  if (appState.stage === "analyze" && stage !== "analyze") {
+    appState.cancelAnalysis = true;
+  }
+  appState.stage = stage;
+  renderStage();
+}
+
+function renderStage() {
+  const isPick = appState.stage === "pick";
+  const isAnalyze = appState.stage === "analyze";
+  const isResults = appState.stage === "results";
+
+  elements.loadStage.classList.toggle("active", appState.stage === "load");
+  elements.trackStage.classList.toggle("active", isPick || isAnalyze);
+  elements.resultsStage.classList.toggle("active", isResults);
+
+  elements.stageButtons.forEach((button) => {
+    const target = button.dataset.stageTarget;
+    button.classList.toggle("active", target === appState.stage);
+    button.disabled = !canEnterStage(target) && target !== appState.stage;
+  });
+
+  elements.trackTitle.textContent = isAnalyze ? "Watching analysis" : "Pick the car";
+  elements.trackSubtitle.textContent = isAnalyze
+    ? "The browser is tracking the selected vehicle. You can back out to change the frame if needed."
+    : "Choose a sampled frame, click the vehicle, then analyze it.";
+  elements.trackBackButton.textContent = isAnalyze ? "Back to pick" : "Back to load";
+  elements.analyzeButton.style.display = isAnalyze ? "none" : "inline-flex";
+  elements.trackCalibrationText.style.display = isAnalyze ? "none" : "inline";
+  elements.sampleGallery.style.display = isAnalyze ? "none" : "grid";
+  elements.resultsStage.hidden = !isResults;
+  elements.loadStage.hidden = appState.stage !== "load";
+  elements.trackStage.hidden = !(isPick || isAnalyze);
+  elements.resultsBackButton.disabled = !appState.sourceVideo;
+  elements.buildVideoButton.disabled = !appState.analysis;
+}
+
 function resetMetrics() {
   elements.metricVehicles.textContent = "0";
   elements.metricPeak.textContent = "0.0 mph";
   elements.metricAvg.textContent = "0.0 mph";
   elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No results yet.</td></tr>';
   elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
-  elements.noteText.textContent = "Not available yet.";
-  elements.calibrationText.textContent = "Not available yet.";
+  elements.resultsNoteText.textContent = "Not available yet.";
+  elements.resultsCalibrationText.textContent = "Not available yet.";
+  elements.trackCalibrationText.textContent = "Not available yet.";
+  elements.trackStatusText.textContent = "Load a clip to start.";
+  elements.resultsStatusText.textContent = "Waiting for analysis.";
   elements.selectionText.textContent = "Selected vehicle: none";
   elements.sampleGallery.innerHTML = '<p class="sample-placeholder">No sampled frames yet.</p>';
   elements.decodeText.textContent = "Source: not loaded";
   setAnalyzeButtonEnabled(false);
+  revokeAnnotatedVideo();
 }
 
 function renderSamplePicker() {
@@ -216,6 +307,13 @@ function describeCalibration(calibration) {
   }
   details.push(`${Math.round(calibration.confidence * 100)}% confidence`);
   return `${method} ${calibration.angleDeg.toFixed(0)}deg - ${details.join(" - ")}`;
+}
+
+function updateCalibrationText(calibration) {
+  const text = describeCalibration(calibration);
+  elements.trackCalibrationText.textContent = text;
+  elements.resultsCalibrationText.textContent = text;
+  return text;
 }
 
 function buildCsv(rows, headers) {
@@ -546,10 +644,19 @@ async function analyzeSelectedVehicle() {
   const trackScores = new Map();
 
   for (let index = 0; index < sampleTimes.length; index += 1) {
+    if (appState.cancelAnalysis) {
+      throw new Error("Analysis canceled.");
+    }
     const timeS = sampleTimes[index];
     await seekVideo(video, timeS);
+    if (appState.cancelAnalysis) {
+      throw new Error("Analysis canceled.");
+    }
     frameContext.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
     const detections = await detector.infer(frameCanvas, getConfidenceThreshold());
+    if (appState.cancelAnalysis) {
+      throw new Error("Analysis canceled.");
+    }
     const annotated = tracker.update(detections, timeS, measureDetection);
     annotatedSamples.push({
       timeS,
@@ -659,10 +766,11 @@ async function analyzeSelectedVehicle() {
   elements.metricVehicles.textContent = summary.length ? "1" : "0";
   elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
   elements.metricAvg.textContent = `${avgObserved.toFixed(1)} mph`;
-  elements.calibrationText.textContent = describeCalibration(appState.roadCalibration);
-  elements.noteText.textContent = reportedSpeedMph > 0
+  updateCalibrationText(appState.roadCalibration);
+  elements.resultsNoteText.textContent = reportedSpeedMph > 0
     ? `${appState.analysis.note} Peak differs from reported by ${speedDeltaMph?.toFixed(1) ?? "n/a"} mph.`
     : appState.analysis.note;
+  setResultsStatus("Analysis complete. Build the final annotated WebM below.");
 
   renderSummaryTable(summary);
   renderFrameTable(frameMetrics);
@@ -690,7 +798,8 @@ async function analyzeSelectedVehicle() {
   );
   elements.replayButton.classList.remove("disabled");
   elements.exportVideo.classList.remove("disabled");
-  setStatus("Analysis complete for the selected vehicle.");
+  elements.buildVideoButton.disabled = false;
+  setStage("results", { force: true });
   setProgress(1);
   appState.mode = "select-target";
   setAnalyzeButtonEnabled(Boolean(appState.selectedTarget));
@@ -743,7 +852,13 @@ async function exportAnnotatedVideo() {
 
   recorder.stop();
   await stopped;
-  setDownload(elements.exportVideo, "traffic-review-target-annotated.webm", chunks, "video/webm");
+  const blob = new Blob(chunks, { type: "video/webm" });
+  revokeAnnotatedVideo();
+  appState.annotatedVideoUrl = URL.createObjectURL(blob);
+  elements.annotatedVideo.src = appState.annotatedVideoUrl;
+  elements.annotatedVideoText.textContent = "Final annotated WebM ready to play.";
+  setDownload(elements.exportVideo, "traffic-review-target-annotated.webm", blob, "video/webm");
+  elements.resultsStatusText.textContent = "Annotated WebM built. Play it above or download it.";
   setStatus("Annotated WebM export ready.");
 }
 
@@ -802,13 +917,15 @@ async function prepareSelection(file) {
   appState.selectionFrame = appState.selectionSamples[0];
   appState.selectedTarget = null;
   appState.mode = "select-target";
+  appState.stage = "pick";
   setAnalyzeButtonEnabled(false);
   renderSampleGallery();
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, null);
-  elements.noteText.textContent = "Choose a sampled frame, click the vehicle, then analyze it.";
   elements.selectionText.textContent = "Selected vehicle: none";
-  elements.calibrationText.textContent = describeCalibration(appState.roadCalibration);
+  updateCalibrationText(appState.roadCalibration);
   setStatus("Choose a sample frame, then click the vehicle you want to track.");
+  setResultsStatus("Waiting for analysis.");
+  setStage("pick", { force: true });
 }
 
 async function handleFile(file) {
@@ -821,7 +938,7 @@ async function handleFile(file) {
     appState.mode = "idle";
     setProgress(0);
     setStatus(error.message);
-    elements.noteText.textContent = "Failed while loading the clip or finding vehicles.";
+    elements.resultsNoteText.textContent = "Failed while loading the clip or finding vehicles.";
   }
 }
 
@@ -875,7 +992,7 @@ elements.previewCanvas.addEventListener("click", async (event) => {
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, target.trackId);
   setAnalyzeButtonEnabled(true);
   elements.selectionText.textContent = `Selected vehicle: ${target.label}`;
-  elements.calibrationText.textContent = describeCalibration(appState.roadCalibration);
+  updateCalibrationText(appState.roadCalibration);
   setStatus(`Selected ${target.label}. Press Analyze selected vehicle.`);
 });
 
@@ -895,26 +1012,53 @@ elements.sampleGallery.addEventListener("click", (event) => {
   renderSampleGallery();
   drawPreview(sample.frameCanvas, sample.detections, null);
   setStatus(`Selected sample at ${sample.timeS.toFixed(2)}s. Click the vehicle you want to track.`);
+  updateCalibrationText(appState.roadCalibration);
 });
 
-elements.analyzeButton.addEventListener("click", async () => {
+elements.stageButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const target = button.dataset.stageTarget;
+    if (target === "analyze") {
+      await beginAnalysis();
+      return;
+    }
+    setStage(target, { force: true });
+  });
+});
+
+async function beginAnalysis() {
   if (!appState.selectionFrame || !appState.selectedTarget) {
     setStatus("Click the vehicle you want to track first.");
     return;
   }
 
   appState.mode = "analyzing";
+  appState.stage = "analyze";
+  appState.cancelAnalysis = false;
   setAnalyzeButtonEnabled(false);
   setStatus(`Analyzing ${appState.selectedTarget.label}.`);
+  setStage("analyze", { force: true });
 
   try {
     await analyzeSelectedVehicle();
   } catch (error) {
+    if (appState.cancelAnalysis || error.message === "Analysis canceled.") {
+      appState.cancelAnalysis = false;
+      setResultsStatus("Analysis canceled. Choose another frame or go back to load a different clip.");
+      setStage("pick", { force: true });
+      setStatus("Analysis canceled.");
+      setAnalyzeButtonEnabled(Boolean(appState.selectedTarget));
+      return;
+    }
     appState.mode = "select-target";
     setStatus(error.message);
-    elements.noteText.textContent = "The selected vehicle could not be tracked through the clip.";
+    elements.resultsNoteText.textContent = "The selected vehicle could not be tracked through the clip.";
     setAnalyzeButtonEnabled(Boolean(appState.selectedTarget));
   }
+}
+
+elements.analyzeButton.addEventListener("click", async () => {
+  await beginAnalysis();
 });
 
 elements.fileInput.addEventListener("change", async (event) => {
@@ -931,6 +1075,23 @@ elements.demoButton.addEventListener("click", async () => {
   } finally {
     elements.demoButton.disabled = false;
   }
+});
+
+elements.trackBackButton.addEventListener("click", () => {
+  if (appState.stage === "analyze") {
+    appState.cancelAnalysis = true;
+    setStage("pick", { force: true });
+    return;
+  }
+  setStage("load", { force: true });
+});
+
+elements.resultsBackButton.addEventListener("click", () => {
+  setStage("pick", { force: true });
+});
+
+elements.buildVideoButton.addEventListener("click", async () => {
+  await exportAnnotatedVideo();
 });
 
 elements.samplePicker.addEventListener("click", async (event) => {
@@ -980,4 +1141,5 @@ elements.exportVideo.addEventListener("click", async () => {
 clearDownloads();
 resetMetrics();
 renderSamplePicker();
+setStage("load", { force: true });
 setStatus("Load the demo clip or upload a file.");
