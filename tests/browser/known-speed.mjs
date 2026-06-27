@@ -433,15 +433,6 @@ async function runCase(page, speedMph, toleranceMph) {
 
   await uploadKnownSpeedClip(page, worldToImage, speedMph);
 
-  await page.evaluate((reportedSpeed) => {
-    const input = document.querySelector("#reported-speed");
-    if (input) {
-      input.value = String(reportedSpeed);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-  }, speedMph);
-
   await page.waitForFunction(() => {
     const status = document.querySelector("#track-status-text");
     return status && /click the vehicle/i.test(status.textContent);

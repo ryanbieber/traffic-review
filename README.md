@@ -63,7 +63,7 @@ cd /home/carnufex/traffic-review
 npm run test:browser
 ```
 
-The smoke test serves `docs/`, generates a small in-browser WebM clip from a real bus image, waits for the selection prompt, clicks a detected vehicle on the canvas, and verifies that the app produces target-specific results and downloadable output.
+The smoke test serves `docs/`, uploads a local fixture clip, waits for the selection prompt, clicks a detected vehicle on the canvas, and verifies that the app produces target-specific results and downloadable output.
 
 ## Recommended workflow for real clips
 
