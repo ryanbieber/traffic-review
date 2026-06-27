@@ -29,7 +29,7 @@
           <div class="panel-card">
             <div class="panel-label">Simple Mode</div>
             <strong>Drop a clip and run</strong>
-            <p>The app now estimates speed from tracked screen motion and assumed vehicle width, with no manual homography step.</p>
+            <p>The app estimates speed from tracked screen motion and assumed vehicle width, with no manual homography step and automatic browser-side conversion when uploads need it.</p>
           </div>
         </div>
       </header>
@@ -38,7 +38,7 @@
         <section class="card upload-card">
           <div class="section-head">
             <h2>Analyze a Video</h2>
-            <p>Everything runs locally in your browser. Drop a short clip and analysis starts automatically.</p>
+            <p>Everything runs locally in your browser. Drop a short clip, pick the car you care about, and the app handles the rest.</p>
           </div>
 
           <form id="analysis-form">
@@ -85,6 +85,15 @@
               <div class="preview-meta">
                 <span id="video-meta">No clip loaded</span>
               </div>
+            </div>
+
+            <div class="section-head compact">
+              <h3>Sample Frames</h3>
+              <p>Choose a sampled JPEG frame first, then click the car you want on the large preview.</p>
+            </div>
+
+            <div id="sample-gallery" class="sample-gallery">
+              <p class="sample-placeholder">No sampled frames yet.</p>
             </div>
 
             <label class="file-field">

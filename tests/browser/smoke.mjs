@@ -122,8 +122,11 @@ async function main() {
     console.log("Waiting for target-pick prompt");
     await page.waitForFunction(() => {
       const status = document.querySelector("#status-text");
-      return status && status.textContent.includes("Click the vehicle");
+      return status && /click the vehicle/i.test(status.textContent);
     }, { timeout: 180000 });
+
+    const sampleCount = await page.$$eval("#sample-gallery [data-sample-index]", (nodes) => nodes.length);
+    assert.ok(sampleCount > 0);
 
     console.log("Clicking detected target");
     const targetBox = await page.evaluate(() => {

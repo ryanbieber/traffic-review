@@ -1,4 +1,10 @@
 import { VehicleTracker } from "./lib/tracker.js";
+import {
+  getConfidenceThreshold,
+  getHistorySeconds,
+  getSpeedLimitMph,
+} from "./lib/settings.js";
+import { transcodeToBrowserVideo } from "./lib/transcode.js";
 import { createYoloDetector } from "./lib/yolo.js";
 
 const ASSUMED_WIDTHS_M = {
@@ -12,6 +18,7 @@ const elements = {
   fileInput: document.querySelector("#video-file"),
   dropZone: document.querySelector("#drop-zone"),
   previewCanvas: document.querySelector("#preview-canvas"),
+  sampleGallery: document.querySelector("#sample-gallery"),
   statusText: document.querySelector("#status-text"),
   engineText: document.querySelector("#engine-text"),
   noteText: document.querySelector("#note-text"),
@@ -38,6 +45,7 @@ const appState = {
   estimatedFps: 30,
   sampleEveryFrames: 3,
   selectionFrame: null,
+  selectionSamples: [],
   selectedTarget: null,
   mode: "idle",
 };
@@ -67,6 +75,7 @@ function resetMetrics() {
   elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
   elements.noteText.textContent = "Not available yet.";
   elements.calibrationText.textContent = "Not available yet.";
+  elements.sampleGallery.innerHTML = '<p class="sample-placeholder">No sampled frames yet.</p>';
 }
 
 function drawPreview(frameSource = null, annotations = null, selectedTrackId = null) {
@@ -174,6 +183,10 @@ function renderFrameTable(rows) {
 
 function waitForVideo(video) {
   return new Promise((resolve, reject) => {
+    if (video.readyState >= 1 && video.videoWidth > 0 && video.videoHeight > 0) {
+      resolve(video);
+      return;
+    }
     const onLoaded = () => {
       cleanup();
       resolve(video);
@@ -188,6 +201,7 @@ function waitForVideo(video) {
     };
     video.addEventListener("loadedmetadata", onLoaded, { once: true });
     video.addEventListener("error", onError, { once: true });
+    video.load();
   });
 }
 
@@ -307,10 +321,12 @@ async function ensureDetector() {
 
 async function findSelectionFrame(video, detector) {
   const candidateTimes = [
-    Math.min(1, Math.max(0, video.duration * 0.2)),
-    Math.min(Math.max(0, video.duration * 0.35), Math.max(0, video.duration - 0.001)),
-    Math.min(Math.max(0, video.duration * 0.5), Math.max(0, video.duration - 0.001)),
     0,
+    Math.min(1, Math.max(0, video.duration * 0.15)),
+    Math.min(Math.max(0, video.duration * 0.3), Math.max(0, video.duration - 0.001)),
+    Math.min(Math.max(0, video.duration * 0.45), Math.max(0, video.duration - 0.001)),
+    Math.min(Math.max(0, video.duration * 0.6), Math.max(0, video.duration - 0.001)),
+    Math.min(Math.max(0, video.duration * 0.8), Math.max(0, video.duration - 0.001)),
   ];
 
   const uniqueTimes = [...new Set(candidateTimes.map((value) => Number(value.toFixed(3))))];
@@ -318,6 +334,7 @@ async function findSelectionFrame(video, detector) {
   frameCanvas.width = video.videoWidth;
   frameCanvas.height = video.videoHeight;
   const frameContext = frameCanvas.getContext("2d");
+  const samples = [];
 
   for (const timeS of uniqueTimes) {
     await seekVideo(video, timeS);
@@ -328,11 +345,42 @@ async function findSelectionFrame(video, detector) {
       snapshot.width = frameCanvas.width;
       snapshot.height = frameCanvas.height;
       snapshot.getContext("2d").drawImage(frameCanvas, 0, 0);
-      return { timeS, frameCanvas: snapshot, detections };
+      samples.push({
+        timeS,
+        frameCanvas: snapshot,
+        detections,
+        previewUrl: snapshot.toDataURL("image/jpeg", 0.8),
+      });
     }
   }
 
-  throw new Error("No vehicles were detected in the sampled frames of this clip.");
+  if (!samples.length) {
+    throw new Error("No vehicles were detected in the sampled frames of this clip.");
+  }
+
+  return samples;
+}
+
+function renderSampleGallery() {
+  if (!appState.selectionSamples.length) {
+    elements.sampleGallery.innerHTML = '<p class="sample-placeholder">No sampled frames yet.</p>';
+    return;
+  }
+
+  elements.sampleGallery.innerHTML = appState.selectionSamples
+    .map(
+      (sample, index) => `
+        <button
+          type="button"
+          class="sample-card ${appState.selectionFrame === sample ? "active" : ""}"
+          data-sample-index="${index}"
+        >
+          <img src="${sample.previewUrl}" alt="Sample at ${sample.timeS.toFixed(2)} seconds">
+          <span>${sample.timeS.toFixed(2)}s • ${sample.detections.length} vehicle(s)</span>
+        </button>
+      `,
+    )
+    .join("");
 }
 
 function buildSampleTimes(duration, fps, step, selectionTimeS) {
@@ -378,8 +426,8 @@ async function analyzeSelectedVehicle() {
 
   const detector = await ensureDetector();
   const tracker = new VehicleTracker({
-    historySeconds: 0.75,
-    speedLimitMph: Number(document.querySelector("#speed-limit").value),
+    historySeconds: getHistorySeconds(),
+    speedLimitMph: getSpeedLimitMph(),
     speedUnit: "mph",
   });
 
@@ -402,7 +450,7 @@ async function analyzeSelectedVehicle() {
     const timeS = sampleTimes[index];
     await seekVideo(video, timeS);
     frameContext.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
-    const detections = await detector.infer(frameCanvas, Number(document.querySelector("#confidence-threshold").value));
+    const detections = await detector.infer(frameCanvas, getConfidenceThreshold());
     const annotated = tracker.update(detections, timeS, measureDetection);
 
     if (selectedTrackId === null && Math.abs(timeS - appState.selectionFrame.timeS) < 0.002) {
@@ -559,17 +607,44 @@ async function loadSelectedFile(file) {
   if (appState.objectUrl) {
     URL.revokeObjectURL(appState.objectUrl);
   }
-  appState.objectUrl = URL.createObjectURL(file);
-  const video = document.createElement("video");
-  video.playsInline = true;
-  video.preload = "auto";
-  video.src = appState.objectUrl;
-  await waitForVideo(video);
+  const createVideo = async (videoFile) => {
+    const video = document.createElement("video");
+    video.playsInline = true;
+    video.preload = "auto";
+    video.muted = true;
+    appState.objectUrl = URL.createObjectURL(videoFile);
+    video.src = appState.objectUrl;
+    await waitForVideo(video);
+    return video;
+  };
+
+  let activeFile = file;
+  let video;
+
+  try {
+    video = await createVideo(activeFile);
+  } catch (error) {
+    setStatus("Browser could not decode the original upload. Converting it locally to a browser-safe WebM.");
+    activeFile = await transcodeToBrowserVideo(file, {
+      onStatus(message) {
+        if (/frame=|time=|size=|video:/i.test(message)) {
+          setStatus("Converting the upload locally to WebM for browser analysis.");
+        }
+      },
+    });
+    if (appState.objectUrl) {
+      URL.revokeObjectURL(appState.objectUrl);
+    }
+    video = await createVideo(activeFile);
+  }
+
   appState.sourceVideo = video;
   appState.estimatedFps = await estimateFps(video);
   appState.sampleEveryFrames = chooseSamplingStep(appState.estimatedFps);
+  document.querySelector("#fps-override").value = String(appState.estimatedFps);
+  document.querySelector("#sample-every-frames").value = String(appState.sampleEveryFrames);
   elements.videoMeta.textContent =
-    `${video.videoWidth}x${video.videoHeight} • ${video.duration.toFixed(2)}s • ~${appState.estimatedFps} fps • ${file.name}`;
+    `${video.videoWidth}x${video.videoHeight} • ${video.duration.toFixed(2)}s • ~${appState.estimatedFps} fps • ${activeFile.name}`;
 }
 
 async function prepareSelection(file) {
@@ -580,13 +655,15 @@ async function prepareSelection(file) {
   await loadSelectedFile(file);
   const detector = await ensureDetector();
   setStatus("Scanning the clip for visible vehicles.");
-  appState.selectionFrame = await findSelectionFrame(appState.sourceVideo, detector);
+  appState.selectionSamples = await findSelectionFrame(appState.sourceVideo, detector);
+  appState.selectionFrame = appState.selectionSamples[0];
   appState.selectedTarget = null;
   appState.mode = "select-target";
+  renderSampleGallery();
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, null);
-  elements.noteText.textContent = "Click the vehicle you want to track. The app will then analyze only that target.";
+  elements.noteText.textContent = "Choose a sampled frame, then click the vehicle you want to track. The app will then analyze only that target.";
   elements.calibrationText.textContent = "Automatic scale from vehicle width";
-  setStatus("Click the vehicle you want to track.");
+  setStatus("Choose a sample frame, then click the vehicle you want to track.");
 }
 
 async function handleFile(file) {
@@ -634,6 +711,22 @@ elements.previewCanvas.addEventListener("click", async (event) => {
     setStatus(error.message);
     elements.noteText.textContent = "The selected vehicle could not be tracked through the clip.";
   }
+});
+
+elements.sampleGallery.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sample-index]");
+  if (!button || appState.mode !== "select-target") {
+    return;
+  }
+  const sample = appState.selectionSamples[Number(button.dataset.sampleIndex)];
+  if (!sample) {
+    return;
+  }
+  appState.selectionFrame = sample;
+  appState.selectedTarget = null;
+  renderSampleGallery();
+  drawPreview(sample.frameCanvas, sample.detections, null);
+  setStatus(`Selected sample at ${sample.timeS.toFixed(2)}s. Click the vehicle you want to track.`);
 });
 
 elements.fileInput.addEventListener("change", async (event) => {
