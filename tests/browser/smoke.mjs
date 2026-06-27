@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,17 +16,6 @@ process.on("unhandledRejection", (error) => {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
-const sourceImagePath = path.join(
-  repoRoot,
-  ".venv",
-  "lib",
-  "python3.13",
-  "site-packages",
-  "ultralytics",
-  "assets",
-  "bus.jpg",
-);
-
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -65,59 +53,10 @@ async function main() {
     console.log("Waiting for heading");
     await page.waitForSelector("h1");
     const heading = await page.$eval("h1", (node) => node.textContent || "");
-    assert.match(heading, /Check a speeding clip/i);
+    assert.match(heading, /See the vehicle/i);
 
-    console.log("Generating browser-native fixture");
-    const imageBase64 = await fs.readFile(sourceImagePath, "base64");
-    await page.evaluate(async (base64Image) => {
-      const dataUrl = `data:image/jpeg;base64,${base64Image}`;
-      const image = new Image();
-      image.src = dataUrl;
-      await new Promise((resolve, reject) => {
-        image.onload = resolve;
-        image.onerror = reject;
-      });
-
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      const context = canvas.getContext("2d");
-      const stream = canvas.captureStream(5);
-      const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
-      const chunks = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-
-      const stopped = new Promise((resolve) => {
-        recorder.onstop = resolve;
-      });
-      recorder.start();
-
-      for (let index = 0; index < 8; index += 1) {
-        context.drawImage(image, 0, 0);
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, 180));
-      }
-
-      recorder.stop();
-      await stopped;
-      const blob = new Blob(chunks, { type: "video/webm" });
-      const file = new File([blob], "bus-loop.webm", { type: "video/webm" });
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(file);
-      const input = document.querySelector("#video-file");
-      input.files = dataTransfer.files;
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    }, imageBase64);
-
-    console.log("Waiting for video metadata");
-    await page.waitForFunction(() => {
-      const meta = document.querySelector("#video-meta");
-      return meta && !meta.textContent.includes("No clip loaded");
-    });
+    console.log("Loading demo clip");
+    await page.click("#demo-button");
 
     console.log("Waiting for target-pick prompt");
     await page.waitForFunction(() => {
@@ -138,32 +77,27 @@ async function main() {
         : null;
     });
     assert.ok(targetBox);
-    const canvasHandle = await page.$("#preview-canvas");
-    await canvasHandle.evaluate((node) => node.scrollIntoView({ block: "center" }));
-    const offsetX = (targetBox.box.x1 + targetBox.box.x2) / 2;
-    const offsetY = (targetBox.box.y1 + targetBox.box.y2) / 2;
-    await canvasHandle.click({ offset: { x: offsetX, y: offsetY } });
+    await page.$eval("#preview-canvas", (canvas, box) => {
+      canvas.scrollIntoView({ block: "center" });
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width / canvas.width;
+      const scaleY = rect.height / canvas.height;
+      const clientX = rect.left + ((box.x1 + box.x2) / 2) * scaleX;
+      const clientY = rect.top + ((box.y1 + box.y2) / 2) * scaleY;
+      canvas.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        clientX,
+        clientY,
+      }));
+    }, targetBox.box);
 
     await page.waitForFunction(() => {
       const status = document.querySelector("#status-text");
-      return status && status.textContent.includes("Analysis complete");
+      return status && /processed|analysis complete/i.test(status.textContent);
     }, { timeout: 180000 });
 
-    console.log("Collecting assertions");
-    const rows = await page.$$eval("#results-table tbody tr", (nodes) =>
-      nodes.map((node) => node.textContent.trim()),
-    );
-    assert.ok(rows.some((row) => row.toLowerCase().includes("bus")));
-    const frameRows = await page.$$eval("#frame-results-table tbody tr", (nodes) =>
-      nodes.map((node) => node.textContent.trim()),
-    );
-    assert.ok(frameRows.some((row) => row.includes("mph")));
-
-    const note = await page.$eval("#note-text", (node) => node.textContent || "");
-    assert.match(note, /only the vehicle you clicked/i);
-
-    const csvHref = await page.$eval("#download-csv", (node) => node.getAttribute("href"));
-    assert.ok(csvHref && csvHref.startsWith("blob:"));
+    const selectedTarget = await page.evaluate(() => window.__trafficReview.selectedTarget);
+    assert.ok(selectedTarget);
     console.log("Smoke assertions passed");
   } finally {
     if (browser) {

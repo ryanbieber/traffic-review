@@ -31,15 +31,11 @@ body {
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 24px;
-  align-items: stretch;
+  display: block;
   margin-bottom: 24px;
 }
 
 .hero-copy,
-.hero-panel,
 .card {
   background: var(--panel);
   backdrop-filter: blur(18px);
@@ -153,6 +149,21 @@ h1 {
   margin-bottom: 18px;
 }
 
+.action-row {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.drop-zone.compact {
+  margin-bottom: 0;
+  flex: 1 1 220px;
+  min-width: 220px;
+  padding: 18px 20px;
+}
+
 .drop-zone.dragover {
   border-color: var(--accent);
   background: rgba(180, 67, 47, 0.08);
@@ -176,27 +187,9 @@ h1 {
   color: var(--muted);
 }
 
-.hero-panel {
-  padding: 20px;
-  display: flex;
-}
-
-.panel-card {
-  background: linear-gradient(180deg, rgba(32, 79, 68, 0.96), rgba(21, 51, 43, 0.96));
-  color: #eff7f3;
-  border-radius: 22px;
-  padding: 24px;
-  width: 100%;
-}
-
-.panel-card p,
-.meta-label {
-  color: rgba(239, 247, 243, 0.78);
-}
-
 .layout {
   display: grid;
-  grid-template-columns: 1.6fr 0.9fr;
+  grid-template-columns: 1fr;
   gap: 24px;
   margin-bottom: 24px;
 }
@@ -286,23 +279,6 @@ select {
   pointer-events: none;
 }
 
-.plain-list {
-  padding-left: 18px;
-  color: var(--muted);
-}
-
-.plain-list li + li {
-  margin-top: 12px;
-}
-
-.warning {
-  margin-top: 18px;
-  padding: 18px;
-  border-radius: 20px;
-  background: rgba(180, 67, 47, 0.1);
-  border: 1px solid rgba(180, 67, 47, 0.18);
-}
-
 .results-card {
   overflow: hidden;
 }
@@ -361,6 +337,29 @@ select {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.75);
+}
+
+.advanced {
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 16px 18px;
+}
+
+.advanced summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+  color: var(--accent-2);
+}
+
+.advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced .grid {
+  margin-top: 16px;
 }
 
 table {

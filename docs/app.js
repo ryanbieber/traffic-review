@@ -15,6 +15,7 @@ const ASSUMED_WIDTHS_M = {
 };
 
 const elements = {
+  demoButton: document.querySelector("#demo-button"),
   fileInput: document.querySelector("#video-file"),
   dropZone: document.querySelector("#drop-zone"),
   previewCanvas: document.querySelector("#preview-canvas"),
@@ -680,6 +681,24 @@ async function handleFile(file) {
   }
 }
 
+async function loadDemoClip() {
+  const response = await fetch("./assets/samples/traffic-demo.webm");
+  if (!response.ok) {
+    throw new Error("The demo clip could not be loaded.");
+  }
+  const blob = await response.blob();
+  const file = new File([blob], "traffic-demo.webm", {
+    type: blob.type || "video/webm",
+    lastModified: Date.now(),
+  });
+  elements.fileInput.files = (() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    return transfer.files;
+  })();
+  await handleFile(file);
+}
+
 elements.previewCanvas.addEventListener("click", async (event) => {
   if (appState.mode !== "select-target" || !appState.selectionFrame) {
     return;
@@ -733,6 +752,18 @@ elements.fileInput.addEventListener("change", async (event) => {
   await handleFile(event.target.files?.[0]);
 });
 
+elements.demoButton.addEventListener("click", async () => {
+  elements.demoButton.disabled = true;
+  setStatus("Loading demo clip.");
+  try {
+    await loadDemoClip();
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    elements.demoButton.disabled = false;
+  }
+});
+
 elements.dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
   elements.dropZone.classList.add("dragover");
@@ -765,4 +796,4 @@ elements.exportVideo.addEventListener("click", async () => {
 
 clearDownloads();
 resetMetrics();
-setStatus("Drag and drop a clip to start.");
+setStatus("Load the demo clip or upload a file.");

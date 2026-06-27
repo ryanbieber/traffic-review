@@ -15,21 +15,12 @@
       <header class="hero">
         <div class="hero-copy">
           <div class="eyebrow">Traffic-camera review</div>
-          <h1>Check a speeding clip without pretending the math is magic.</h1>
-          <p class="lead">
-            Drag in a clip, let the browser run YOLO, and get rough speed metrics without configuring camera geometry by hand.
-          </p>
+          <h1>See the vehicle, then judge the speed.</h1>
+          <p class="lead">Load the demo clip or upload your own video. The browser finds vehicles, lets you pick one, and shows rough speed metrics.</p>
           <div class="hero-points">
+            <span>Demo clip included</span>
             <span>Browser YOLO</span>
-            <span>Auto rough speed</span>
             <span>CSV + JSON + WebM</span>
-          </div>
-        </div>
-        <div class="hero-panel">
-          <div class="panel-card">
-            <div class="panel-label">Simple Mode</div>
-            <strong>Drop a clip and run</strong>
-            <p>The app estimates speed from tracked screen motion and assumed vehicle width, with no manual homography step and automatic browser-side conversion when uploads need it.</p>
           </div>
         </div>
       </header>
@@ -37,47 +28,16 @@
       <main class="layout">
         <section class="card upload-card">
           <div class="section-head">
-            <h2>Analyze a Video</h2>
-            <p>Everything runs locally in your browser. Drop a short clip, pick the car you care about, and the app handles the rest.</p>
+            <h2>Load a clip</h2>
+            <p>Use the built-in demo or choose your own file.</p>
           </div>
 
           <form id="analysis-form">
-            <div class="grid two">
-              <label>
-                <span>Speed limit (mph)</span>
-                <input id="speed-limit" type="number" min="1" step="1" value="35">
-              </label>
-              <label>
-                <span>Confidence threshold</span>
-                <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
-              </label>
-            </div>
-
-            <div class="grid two">
-              <label>
-                <span>Smoothing window (seconds)</span>
-                <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
-              </label>
-              <label>
-                <span>Video FPS</span>
-                <input id="fps-override" type="number" min="1" step="1" value="30">
-              </label>
-            </div>
-
-            <div class="grid two">
-              <label>
-                <span>Sample every N frames</span>
-                <input id="sample-every-frames" type="number" min="1" step="1" value="3">
-              </label>
-              <label>
-                <span>Inference engine</span>
-                <input id="engine-text" type="text" value="Model not loaded yet" readonly>
-              </label>
-            </div>
-
-            <div id="drop-zone" class="drop-zone">
-              <strong>Drop Video Here</strong>
-              <p>or use the file picker below</p>
+            <div class="action-row">
+              <button id="demo-button" type="button" class="primary-btn">Load demo clip</button>
+              <div id="drop-zone" class="drop-zone compact">
+                <strong>Drop video here</strong>
+              </div>
             </div>
 
             <div class="preview-shell">
@@ -87,42 +47,63 @@
               </div>
             </div>
 
+            <details class="advanced">
+              <summary>Advanced settings</summary>
+              <div class="grid two">
+                <label>
+                  <span>Speed limit (mph)</span>
+                  <input id="speed-limit" type="number" min="1" step="1" value="35">
+                </label>
+                <label>
+                  <span>Confidence threshold</span>
+                  <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
+                </label>
+              </div>
+
+              <div class="grid two">
+                <label>
+                  <span>Smoothing window (seconds)</span>
+                  <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
+                </label>
+                <label>
+                  <span>Video FPS</span>
+                  <input id="fps-override" type="number" min="1" step="1" value="30">
+                </label>
+              </div>
+
+              <div class="grid two">
+                <label>
+                  <span>Sample every N frames</span>
+                  <input id="sample-every-frames" type="number" min="1" step="1" value="3">
+                </label>
+                <label>
+                  <span>Inference engine</span>
+                  <input id="engine-text" type="text" value="Model not loaded yet" readonly>
+                </label>
+              </div>
+            </details>
+
+            <label class="file-field">
+              <span>Or choose a file</span>
+              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
+            </label>
+
             <div class="section-head compact">
-              <h3>Sample Frames</h3>
-              <p>Choose a sampled JPEG frame first, then click the car you want on the large preview.</p>
+              <h3>Pick the car</h3>
+              <p>After the clip loads, choose a sample frame and click the vehicle you want.</p>
             </div>
 
             <div id="sample-gallery" class="sample-gallery">
               <p class="sample-placeholder">No sampled frames yet.</p>
             </div>
-
-            <label class="file-field">
-              <span>Video clip</span>
-              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
-            </label>
           </form>
         </section>
-
-        <aside class="card notes-card">
-          <div class="section-head">
-            <h2>What this is good for</h2>
-          </div>
-          <ul class="plain-list">
-            <li>Drop in a clip and get rough vehicle-speed estimates without scene setup.</li>
-            <li>See per-track average speed, peak speed, and per-sampled-frame speed metrics.</li>
-            <li>Export a summary CSV, JSON record, and annotated WebM review.</li>
-          </ul>
-          <div class="warning">
-            <strong>Limit:</strong>
-            <p>These speeds are rough estimates. Without real camera calibration, angle alone does not recover defensible true road speed.</p>
-          </div>
-        </aside>
       </main>
 
       <section class="card results-card">
         <div class="section-head">
           <h2>Results</h2>
-          <p id="status-text">Waiting for a run.</p>
+          <p id="status-text">Load the demo clip or upload a file.</p>
         </div>
 
         <div class="result-meta">
