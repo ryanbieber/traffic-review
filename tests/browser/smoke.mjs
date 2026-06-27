@@ -116,6 +116,8 @@ async function main() {
 
     const selectedTarget = await page.evaluate(() => window.__trafficReview.selectedTarget);
     assert.ok(selectedTarget);
+    const selectionText = await page.$eval("#selection-text", (node) => node.textContent || "");
+    assert.match(selectionText, /Selected vehicle:/i);
     console.log("Smoke assertions passed");
   } finally {
     if (browser) {

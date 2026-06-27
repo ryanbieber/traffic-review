@@ -4,6 +4,7 @@ import {
   getHistorySeconds,
   getSpeedLimitMph,
 } from "./lib/settings.js";
+import { estimateRoadAxis } from "./lib/perspective.js";
 import { transcodeToBrowserVideo } from "./lib/transcode.js";
 import { createYoloDetector } from "./lib/yolo.js";
 
@@ -36,6 +37,7 @@ const elements = {
   replayButton: document.querySelector("#replay-button"),
   videoMeta: document.querySelector("#video-meta"),
   decodeText: document.querySelector("#decode-text"),
+  selectionText: document.querySelector("#selection-text"),
   metricVehicles: document.querySelector("#metric-vehicles"),
   metricPeak: document.querySelector("#metric-peak"),
   metricAvg: document.querySelector("#metric-avg"),
@@ -52,6 +54,7 @@ const appState = {
   selectionFrame: null,
   selectionSamples: [],
   selectedTarget: null,
+  roadAxis: null,
   decodeMode: "idle",
   mode: "idle",
 };
@@ -104,6 +107,7 @@ function resetMetrics() {
   elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
   elements.noteText.textContent = "Not available yet.";
   elements.calibrationText.textContent = "Not available yet.";
+  elements.selectionText.textContent = "Selected vehicle: none";
   elements.sampleGallery.innerHTML = '<p class="sample-placeholder">No sampled frames yet.</p>';
   elements.decodeText.textContent = "Source: not loaded";
   setAnalyzeButtonEnabled(false);
@@ -121,7 +125,7 @@ function renderSamplePicker() {
 
 function setActiveSampleButton(src) {
   elements.samplePicker.querySelectorAll("button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.sampleSrc === src);
+    button.classList.toggle("active", Boolean(src) && button.dataset.sampleSrc === src);
   });
 }
 
@@ -154,14 +158,18 @@ function drawPreview(frameSource = null, annotations = null, selectedTrackId = n
     const isSelected = selectedTrackId !== null && item.trackId === selectedTrackId;
     const color = isSelected ? "#b4432f" : "#204f44";
     context.strokeStyle = color;
-    context.fillStyle = color;
-    context.lineWidth = isSelected ? 4 : 3;
+    context.fillStyle = isSelected ? "rgba(180, 67, 47, 0.14)" : "rgba(32, 79, 68, 0.06)";
+    context.lineWidth = isSelected ? 6 : 3;
+    if (isSelected) {
+      context.fillRect(item.box.x1, item.box.y1, item.box.x2 - item.box.x1, item.box.y2 - item.box.y1);
+    }
     context.strokeRect(item.box.x1, item.box.y1, item.box.x2 - item.box.x1, item.box.y2 - item.box.y1);
     const text = isSelected
-      ? `TARGET ${item.label}`
+      ? `SELECTED ${item.label}`
       : item.trackId
         ? `#${item.trackId} ${item.label}`
         : item.label;
+    context.fillStyle = color;
     context.fillRect(item.box.x1, Math.max(0, item.box.y1 - 28), context.measureText(text).width + 18, 24);
     context.fillStyle = "#fff";
     context.fillText(text, item.box.x1 + 8, Math.max(18, item.box.y1 - 10));
@@ -476,6 +484,7 @@ async function analyzeSelectedVehicle() {
     historySeconds: getHistorySeconds(),
     speedLimitMph: getSpeedLimitMph(),
     speedUnit: "mph",
+    roadAxis: appState.roadAxis?.axis || null,
   });
 
   const video = appState.sourceVideo;
@@ -567,6 +576,9 @@ async function analyzeSelectedVehicle() {
   elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
   elements.metricAvg.textContent = `${avgObserved.toFixed(1)} mph`;
   elements.calibrationText.textContent = "Auto rough scale from selected vehicle width";
+  if (appState.roadAxis) {
+    elements.calibrationText.textContent = `Road axis ${appState.roadAxis.angleDeg.toFixed(0)}° from sampled detections`;
+  }
   elements.noteText.textContent = appState.analysis.note;
 
   renderSummaryTable(summary);
@@ -657,6 +669,7 @@ async function loadSelectedFile(file) {
     URL.revokeObjectURL(appState.objectUrl);
   }
   appState.decodeMode = "direct";
+  setActiveSampleButton(null);
   let activeFile = file;
   if (!file.type.includes("webm")) {
     setStatus("Converting the clip to WebM for browser playback and analysis.");
@@ -702,6 +715,7 @@ async function prepareSelection(file) {
   const detector = await ensureDetector();
   setStatus("Scanning the clip for visible vehicles.");
   appState.selectionSamples = await findSelectionFrame(appState.sourceVideo, detector);
+  appState.roadAxis = estimateRoadAxis(appState.selectionSamples);
   appState.selectionFrame = appState.selectionSamples[0];
   appState.selectedTarget = null;
   appState.mode = "select-target";
@@ -709,7 +723,10 @@ async function prepareSelection(file) {
   renderSampleGallery();
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, null);
   elements.noteText.textContent = "Choose a sampled frame, click the vehicle, then analyze it.";
-  elements.calibrationText.textContent = "Automatic scale from vehicle width";
+  elements.selectionText.textContent = "Selected vehicle: none";
+  elements.calibrationText.textContent = appState.roadAxis
+    ? `Road axis ${appState.roadAxis.angleDeg.toFixed(0)}° inferred from sample frames`
+    : "Automatic scale from vehicle width";
   setStatus("Choose a sample frame, then click the vehicle you want to track.");
 }
 
@@ -773,6 +790,7 @@ elements.previewCanvas.addEventListener("click", async (event) => {
   appState.selectedTarget = target;
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, target.trackId);
   setAnalyzeButtonEnabled(true);
+  elements.selectionText.textContent = `Selected vehicle: ${target.label}`;
   setStatus(`Selected ${target.label}. Press Analyze selected vehicle.`);
 });
 
@@ -788,6 +806,7 @@ elements.sampleGallery.addEventListener("click", (event) => {
   appState.selectionFrame = sample;
   appState.selectedTarget = null;
   setAnalyzeButtonEnabled(false);
+  elements.selectionText.textContent = "Selected vehicle: none";
   renderSampleGallery();
   drawPreview(sample.frameCanvas, sample.detections, null);
   setStatus(`Selected sample at ${sample.timeS.toFixed(2)}s. Click the vehicle you want to track.`);

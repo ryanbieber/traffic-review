@@ -221,6 +221,11 @@ h1 {
   font-size: 0.82rem;
 }
 
+#selection-text {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 1fr;

@@ -8,7 +8,18 @@ function centerDistance(boxA, boxB) {
   return Math.hypot(ax - bx, ay - by);
 }
 
-function estimateSpeed(track, historySeconds) {
+function normalizeVector(vector) {
+  if (!vector) {
+    return null;
+  }
+  const length = Math.hypot(vector[0], vector[1]);
+  if (length < 1e-12) {
+    return null;
+  }
+  return [vector[0] / length, vector[1] / length];
+}
+
+function estimateSpeed(track, historySeconds, roadAxis = null) {
   if (track.history.length < 2) {
     return null;
   }
@@ -28,10 +39,12 @@ function estimateSpeed(track, historySeconds) {
     return null;
   }
 
-  const pixelDistance = Math.hypot(
-    newest.anchorPoint[0] - oldest.anchorPoint[0],
-    newest.anchorPoint[1] - oldest.anchorPoint[1],
-  );
+  const deltaX = newest.anchorPoint[0] - oldest.anchorPoint[0];
+  const deltaY = newest.anchorPoint[1] - oldest.anchorPoint[1];
+  const axis = normalizeVector(roadAxis);
+  const pixelDistance = axis
+    ? Math.abs(deltaX * axis[0] + deltaY * axis[1])
+    : Math.hypot(deltaX, deltaY);
   const averageScale = (newest.metersPerPixel + oldest.metersPerPixel) / 2;
   const distanceM = pixelDistance * averageScale;
   return (distanceM / elapsed) * track.speedMultiplier;
@@ -45,6 +58,7 @@ export class VehicleTracker {
     speedUnit = "mph",
     maxIdleSeconds = 1.5,
     maxMatchDistance = 140,
+    roadAxis = null,
   }) {
     this.historySeconds = historySeconds;
     this.speedLimitMph = speedLimitMph;
@@ -52,6 +66,7 @@ export class VehicleTracker {
     this.speedUnit = speedUnit;
     this.maxIdleSeconds = maxIdleSeconds;
     this.maxMatchDistance = maxMatchDistance;
+    this.roadAxis = normalizeVector(roadAxis);
     this.nextTrackId = 1;
     this.tracks = new Map();
     this.completedTracks = [];
@@ -181,7 +196,7 @@ export class VehicleTracker {
     });
     track.history = track.history.filter((entry) => timeS - entry.timeS <= this.historySeconds * 2.5);
 
-    const speed = estimateSpeed(track, this.historySeconds);
+    const speed = estimateSpeed(track, this.historySeconds, this.roadAxis);
     if (speed !== null && Number.isFinite(speed)) {
       track.currentSpeed = speed;
       track.speedSamples.push(speed);
