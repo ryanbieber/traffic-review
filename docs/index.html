@@ -38,11 +38,14 @@
               <button id="analyze-button" type="button" class="primary-btn disabled">Analyze selected vehicle</button>
             </div>
 
+            <div id="sample-picker" class="sample-picker"></div>
+
             <div id="drop-zone" class="drop-zone compact">
               <strong>Drop video here</strong>
             </div>
 
             <div class="preview-shell">
+              <video id="source-video" class="source-video" controls muted playsinline></video>
               <canvas id="preview-canvas" width="960" height="540"></canvas>
               <div class="preview-meta">
                 <span id="video-meta">No clip loaded</span>

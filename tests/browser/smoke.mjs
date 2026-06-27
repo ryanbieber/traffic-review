@@ -58,6 +58,9 @@ async function main() {
     console.log("Loading demo clip");
     await page.click("#demo-button");
 
+    const sampleButtons = await page.$$eval("#sample-picker [data-sample-src]", (nodes) => nodes.length);
+    assert.ok(sampleButtons >= 3);
+
     console.log("Waiting for target-pick prompt");
     await page.waitForFunction(() => {
       const status = document.querySelector("#status-text");

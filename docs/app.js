@@ -17,6 +17,8 @@ const ASSUMED_WIDTHS_M = {
 const elements = {
   demoButton: document.querySelector("#demo-button"),
   analyzeButton: document.querySelector("#analyze-button"),
+  samplePicker: document.querySelector("#sample-picker"),
+  sourceVideo: document.querySelector("#source-video"),
   fileInput: document.querySelector("#video-file"),
   dropZone: document.querySelector("#drop-zone"),
   previewCanvas: document.querySelector("#preview-canvas"),
@@ -54,6 +56,24 @@ const appState = {
   mode: "idle",
 };
 
+const SAMPLE_CLIPS = [
+  {
+    key: "demo",
+    label: "Demo traffic",
+    src: "./assets/samples/traffic-demo.webm",
+  },
+  {
+    key: "bridge",
+    label: "Bridge traffic",
+    src: "./assets/samples/motorway-a40.webm",
+  },
+  {
+    key: "night",
+    label: "Night cars",
+    src: "./assets/samples/cars-night.webm",
+  },
+];
+
 window.__trafficReview = appState;
 
 function setStatus(text) {
@@ -87,6 +107,22 @@ function resetMetrics() {
   elements.sampleGallery.innerHTML = '<p class="sample-placeholder">No sampled frames yet.</p>';
   elements.decodeText.textContent = "Source: not loaded";
   setAnalyzeButtonEnabled(false);
+}
+
+function renderSamplePicker() {
+  elements.samplePicker.innerHTML = SAMPLE_CLIPS
+    .map(
+      (clip) => `
+        <button type="button" data-sample-src="${clip.src}" data-sample-key="${clip.key}">${clip.label}</button>
+      `,
+    )
+    .join("");
+}
+
+function setActiveSampleButton(src) {
+  elements.samplePicker.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.sampleSrc === src);
+  });
 }
 
 function drawPreview(frameSource = null, annotations = null, selectedTrackId = null) {
@@ -621,48 +657,39 @@ async function loadSelectedFile(file) {
     URL.revokeObjectURL(appState.objectUrl);
   }
   appState.decodeMode = "direct";
-  const createVideo = async (videoFile) => {
-    const video = document.createElement("video");
-    video.playsInline = true;
-    video.preload = "auto";
-    video.muted = true;
-    appState.objectUrl = URL.createObjectURL(videoFile);
-    video.src = appState.objectUrl;
-    await waitForVideo(video);
-    return video;
-  };
-
   let activeFile = file;
-  let video;
-
-  try {
-    video = await createVideo(activeFile);
-  } catch (error) {
-    setStatus("Browser could not decode the original upload. Camera MP4s often need a local WebM conversion.");
+  if (!file.type.includes("webm")) {
+    setStatus("Converting the clip to WebM for browser playback and analysis.");
     appState.decodeMode = "converted";
     activeFile = await transcodeToBrowserVideo(file, {
       onStatus(message) {
         if (/frame=|time=|size=|video:/i.test(message)) {
-          setStatus("Converting the upload locally to WebM for browser analysis.");
+          setStatus("Converting the clip to WebM for browser playback and analysis.");
         }
       },
     });
-    if (appState.objectUrl) {
-      URL.revokeObjectURL(appState.objectUrl);
-    }
-    video = await createVideo(activeFile);
   }
 
-  appState.sourceVideo = video;
-  appState.estimatedFps = await estimateFps(video);
+  if (appState.objectUrl) {
+    URL.revokeObjectURL(appState.objectUrl);
+  }
+  appState.objectUrl = URL.createObjectURL(activeFile);
+  elements.sourceVideo.playsInline = true;
+  elements.sourceVideo.preload = "auto";
+  elements.sourceVideo.muted = true;
+  elements.sourceVideo.src = appState.objectUrl;
+  await waitForVideo(elements.sourceVideo);
+
+  appState.sourceVideo = elements.sourceVideo;
+  appState.estimatedFps = await estimateFps(elements.sourceVideo);
   appState.sampleEveryFrames = chooseSamplingStep(appState.estimatedFps);
   document.querySelector("#fps-override").value = String(appState.estimatedFps);
   document.querySelector("#sample-every-frames").value = String(appState.sampleEveryFrames);
   elements.videoMeta.textContent =
-    `${video.videoWidth}x${video.videoHeight} • ${video.duration.toFixed(2)}s • ~${appState.estimatedFps} fps • ${activeFile.name}`;
+    `${elements.sourceVideo.videoWidth}x${elements.sourceVideo.videoHeight} • ${elements.sourceVideo.duration.toFixed(2)}s • ~${appState.estimatedFps} fps • ${activeFile.name}`;
   elements.decodeText.textContent =
     appState.decodeMode === "converted"
-      ? "Source: converted from MP4 for browser playback"
+      ? "Source: converted to WebM for browser playback"
       : "Source: decoded directly in the browser";
 }
 
@@ -701,12 +728,18 @@ async function handleFile(file) {
 }
 
 async function loadDemoClip() {
-  const response = await fetch("./assets/samples/traffic-demo.webm");
+  await loadSampleClip(SAMPLE_CLIPS[0].src);
+}
+
+async function loadSampleClip(src) {
+  const response = await fetch(src);
   if (!response.ok) {
-    throw new Error("The demo clip could not be loaded.");
+    throw new Error("The sample clip could not be loaded.");
   }
+  setActiveSampleButton(src);
   const blob = await response.blob();
-  const file = new File([blob], "traffic-demo.webm", {
+  const name = src.split("/").pop() || "sample.webm";
+  const file = new File([blob], name, {
     type: blob.type || "video/webm",
     lastModified: Date.now(),
   });
@@ -796,6 +829,20 @@ elements.demoButton.addEventListener("click", async () => {
   }
 });
 
+elements.samplePicker.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-sample-src]");
+  if (!button) {
+    return;
+  }
+  setActiveSampleButton(button.dataset.sampleSrc);
+  setStatus(`Loading ${button.textContent || "sample"}.`);
+  try {
+    await loadSampleClip(button.dataset.sampleSrc);
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+
 elements.dropZone.addEventListener("dragover", (event) => {
   event.preventDefault();
   elements.dropZone.classList.add("dragover");
@@ -828,4 +875,5 @@ elements.exportVideo.addEventListener("click", async () => {
 
 clearDownloads();
 resetMetrics();
+renderSamplePicker();
 setStatus("Load the demo clip or upload a file.");
