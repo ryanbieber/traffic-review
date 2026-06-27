@@ -19,13 +19,58 @@ function normalizeVector(vector) {
   return [vector[0] / length, vector[1] / length];
 }
 
+function fitSlope(samples, valueAccessor) {
+  if (samples.length < 2) {
+    return null;
+  }
+
+  const baseTime = samples[0].timeS;
+  let count = 0;
+  let sumTime = 0;
+  let sumValue = 0;
+  let sumTimeSq = 0;
+  let sumTimeValue = 0;
+
+  for (const sample of samples) {
+    const timeOffset = sample.timeS - baseTime;
+    const value = valueAccessor(sample);
+    if (!Number.isFinite(timeOffset) || !Number.isFinite(value)) {
+      continue;
+    }
+    count += 1;
+    sumTime += timeOffset;
+    sumValue += value;
+    sumTimeSq += timeOffset * timeOffset;
+    sumTimeValue += timeOffset * value;
+  }
+
+  if (count < 2) {
+    return null;
+  }
+
+  const denominator = (count * sumTimeSq) - (sumTime * sumTime);
+  if (Math.abs(denominator) < 1e-12) {
+    return null;
+  }
+
+  return ((count * sumTimeValue) - (sumTime * sumValue)) / denominator;
+}
+
 function estimateSpeed(track, historySeconds, roadAxis = null) {
   if (track.history.length < 2) {
     return null;
   }
 
   const newest = track.history[track.history.length - 1];
-  let oldest = track.history[0];
+  const relevant = track.history.filter((entry) => newest.timeS - entry.timeS <= historySeconds * 2.5);
+
+  const worldSlope = fitSlope(relevant, (entry) => entry.worldPoint?.[1]);
+  if (worldSlope !== null && Number.isFinite(worldSlope)) {
+    return Math.abs(worldSlope) * track.speedMultiplier;
+  }
+
+  let distanceM = null;
+  let oldest = relevant[0] || track.history[0];
   for (let index = track.history.length - 2; index >= 0; index -= 1) {
     const candidate = track.history[index];
     oldest = candidate;
@@ -39,7 +84,6 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
     return null;
   }
 
-  let distanceM = null;
   if (newest.worldPoint && oldest.worldPoint) {
     distanceM = Math.hypot(
       newest.worldPoint[0] - oldest.worldPoint[0],

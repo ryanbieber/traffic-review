@@ -721,10 +721,7 @@ async function analyzeSelectedVehicle() {
     .flatMap((sample) => sample.detections.map((item) => item.worldPoint))
     .filter((point) => Array.isArray(point) && point.every(Number.isFinite));
   const projectedDistanceM = worldPoints.length >= 2
-    ? Math.hypot(
-      worldPoints[worldPoints.length - 1][0] - worldPoints[0][0],
-      worldPoints[worldPoints.length - 1][1] - worldPoints[0][1],
-    )
+    ? Math.abs(worldPoints[worldPoints.length - 1][1] - worldPoints[0][1])
     : null;
   const frameMetrics = allSamples.map((sample) => {
     const speeds = sample.detections
