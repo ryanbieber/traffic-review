@@ -35,15 +35,18 @@
           <form id="analysis-form">
             <div class="action-row">
               <button id="demo-button" type="button" class="primary-btn">Load demo clip</button>
-              <div id="drop-zone" class="drop-zone compact">
-                <strong>Drop video here</strong>
-              </div>
+              <button id="analyze-button" type="button" class="primary-btn disabled">Analyze selected vehicle</button>
+            </div>
+
+            <div id="drop-zone" class="drop-zone compact">
+              <strong>Drop video here</strong>
             </div>
 
             <div class="preview-shell">
               <canvas id="preview-canvas" width="960" height="540"></canvas>
               <div class="preview-meta">
                 <span id="video-meta">No clip loaded</span>
+                <span id="decode-text">Source: not loaded</span>
               </div>
             </div>
 
@@ -90,7 +93,7 @@
 
             <div class="section-head compact">
               <h3>Pick the car</h3>
-              <p>After the clip loads, choose a sample frame and click the vehicle you want.</p>
+              <p>Choose a sample frame, click the vehicle, then analyze it.</p>
             </div>
 
             <div id="sample-gallery" class="sample-gallery">

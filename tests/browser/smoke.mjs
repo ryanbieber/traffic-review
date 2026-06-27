@@ -92,9 +92,24 @@ async function main() {
     }, targetBox.box);
 
     await page.waitForFunction(() => {
-      const status = document.querySelector("#status-text");
-      return status && /processed|analysis complete/i.test(status.textContent);
+      const button = document.querySelector("#analyze-button");
+      return button && !button.classList.contains("disabled");
     }, { timeout: 180000 });
+
+    await page.evaluate(() => {
+      window.__trafficReview.sampleEveryFrames = 12;
+      const input = document.querySelector("#sample-every-frames");
+      if (input) {
+        input.value = "12";
+      }
+    });
+
+    await page.click("#analyze-button");
+
+    await page.waitForFunction(() => {
+      const status = document.querySelector("#status-text");
+      return status && /analyzing/i.test(status.textContent);
+    }, { timeout: 30000 });
 
     const selectedTarget = await page.evaluate(() => window.__trafficReview.selectedTarget);
     assert.ok(selectedTarget);

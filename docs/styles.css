@@ -180,11 +180,12 @@ h1 {
 
 .preview-meta {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 4px;
   margin-top: 12px;
-  align-items: center;
   color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
 }
 
 .layout {
@@ -274,6 +275,7 @@ select {
   transform: translateY(-1px);
 }
 
+.primary-btn:disabled,
 .ghost-btn.disabled {
   opacity: 0.45;
   pointer-events: none;

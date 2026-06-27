@@ -16,6 +16,7 @@ const ASSUMED_WIDTHS_M = {
 
 const elements = {
   demoButton: document.querySelector("#demo-button"),
+  analyzeButton: document.querySelector("#analyze-button"),
   fileInput: document.querySelector("#video-file"),
   dropZone: document.querySelector("#drop-zone"),
   previewCanvas: document.querySelector("#preview-canvas"),
@@ -32,6 +33,7 @@ const elements = {
   exportVideo: document.querySelector("#export-video"),
   replayButton: document.querySelector("#replay-button"),
   videoMeta: document.querySelector("#video-meta"),
+  decodeText: document.querySelector("#decode-text"),
   metricVehicles: document.querySelector("#metric-vehicles"),
   metricPeak: document.querySelector("#metric-peak"),
   metricAvg: document.querySelector("#metric-avg"),
@@ -48,6 +50,7 @@ const appState = {
   selectionFrame: null,
   selectionSamples: [],
   selectedTarget: null,
+  decodeMode: "idle",
   mode: "idle",
 };
 
@@ -68,6 +71,11 @@ function clearDownloads() {
   elements.replayButton.classList.add("disabled");
 }
 
+function setAnalyzeButtonEnabled(enabled) {
+  elements.analyzeButton.classList.toggle("disabled", !enabled);
+  elements.analyzeButton.disabled = !enabled;
+}
+
 function resetMetrics() {
   elements.metricVehicles.textContent = "0";
   elements.metricPeak.textContent = "0.0 mph";
@@ -77,6 +85,8 @@ function resetMetrics() {
   elements.noteText.textContent = "Not available yet.";
   elements.calibrationText.textContent = "Not available yet.";
   elements.sampleGallery.innerHTML = '<p class="sample-placeholder">No sampled frames yet.</p>';
+  elements.decodeText.textContent = "Source: not loaded";
+  setAnalyzeButtonEnabled(false);
 }
 
 function drawPreview(frameSource = null, annotations = null, selectedTrackId = null) {
@@ -551,6 +561,8 @@ async function analyzeSelectedVehicle() {
   elements.exportVideo.classList.remove("disabled");
   setStatus("Analysis complete for the selected vehicle.");
   setProgress(1);
+  appState.mode = "select-target";
+  setAnalyzeButtonEnabled(Boolean(appState.selectedTarget));
 }
 
 async function replayAnnotated() {
@@ -608,6 +620,7 @@ async function loadSelectedFile(file) {
   if (appState.objectUrl) {
     URL.revokeObjectURL(appState.objectUrl);
   }
+  appState.decodeMode = "direct";
   const createVideo = async (videoFile) => {
     const video = document.createElement("video");
     video.playsInline = true;
@@ -625,7 +638,8 @@ async function loadSelectedFile(file) {
   try {
     video = await createVideo(activeFile);
   } catch (error) {
-    setStatus("Browser could not decode the original upload. Converting it locally to a browser-safe WebM.");
+    setStatus("Browser could not decode the original upload. Camera MP4s often need a local WebM conversion.");
+    appState.decodeMode = "converted";
     activeFile = await transcodeToBrowserVideo(file, {
       onStatus(message) {
         if (/frame=|time=|size=|video:/i.test(message)) {
@@ -646,6 +660,10 @@ async function loadSelectedFile(file) {
   document.querySelector("#sample-every-frames").value = String(appState.sampleEveryFrames);
   elements.videoMeta.textContent =
     `${video.videoWidth}x${video.videoHeight} • ${video.duration.toFixed(2)}s • ~${appState.estimatedFps} fps • ${activeFile.name}`;
+  elements.decodeText.textContent =
+    appState.decodeMode === "converted"
+      ? "Source: converted from MP4 for browser playback"
+      : "Source: decoded directly in the browser";
 }
 
 async function prepareSelection(file) {
@@ -660,9 +678,10 @@ async function prepareSelection(file) {
   appState.selectionFrame = appState.selectionSamples[0];
   appState.selectedTarget = null;
   appState.mode = "select-target";
+  setAnalyzeButtonEnabled(false);
   renderSampleGallery();
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, null);
-  elements.noteText.textContent = "Choose a sampled frame, then click the vehicle you want to track. The app will then analyze only that target.";
+  elements.noteText.textContent = "Choose a sampled frame, click the vehicle, then analyze it.";
   elements.calibrationText.textContent = "Automatic scale from vehicle width";
   setStatus("Choose a sample frame, then click the vehicle you want to track.");
 }
@@ -719,17 +738,9 @@ elements.previewCanvas.addEventListener("click", async (event) => {
 
   console.info("Selected target", target.label, target.box);
   appState.selectedTarget = target;
-  appState.mode = "analyzing";
   drawPreview(appState.selectionFrame.frameCanvas, appState.selectionFrame.detections, target.trackId);
-  setStatus(`Selected ${target.label}. Running full analysis.`);
-
-  try {
-    await analyzeSelectedVehicle();
-  } catch (error) {
-    appState.mode = "idle";
-    setStatus(error.message);
-    elements.noteText.textContent = "The selected vehicle could not be tracked through the clip.";
-  }
+  setAnalyzeButtonEnabled(true);
+  setStatus(`Selected ${target.label}. Press Analyze selected vehicle.`);
 });
 
 elements.sampleGallery.addEventListener("click", (event) => {
@@ -743,9 +754,30 @@ elements.sampleGallery.addEventListener("click", (event) => {
   }
   appState.selectionFrame = sample;
   appState.selectedTarget = null;
+  setAnalyzeButtonEnabled(false);
   renderSampleGallery();
   drawPreview(sample.frameCanvas, sample.detections, null);
   setStatus(`Selected sample at ${sample.timeS.toFixed(2)}s. Click the vehicle you want to track.`);
+});
+
+elements.analyzeButton.addEventListener("click", async () => {
+  if (!appState.selectionFrame || !appState.selectedTarget) {
+    setStatus("Click the vehicle you want to track first.");
+    return;
+  }
+
+  appState.mode = "analyzing";
+  setAnalyzeButtonEnabled(false);
+  setStatus(`Analyzing ${appState.selectedTarget.label}.`);
+
+  try {
+    await analyzeSelectedVehicle();
+  } catch (error) {
+    appState.mode = "select-target";
+    setStatus(error.message);
+    elements.noteText.textContent = "The selected vehicle could not be tracked through the clip.";
+    setAnalyzeButtonEnabled(Boolean(appState.selectedTarget));
+  }
 });
 
 elements.fileInput.addEventListener("change", async (event) => {
