@@ -76,15 +76,6 @@ async function main() {
       return button && !button.classList.contains("disabled");
     }, { timeout: 240000 });
 
-    await page.evaluate((reportedSpeed) => {
-      const input = document.querySelector("#reported-speed");
-      if (input) {
-        input.value = String(reportedSpeed);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    }, expectedSpeedMph);
-
     await page.click("#analyze-button");
 
     await page.waitForFunction(() => {

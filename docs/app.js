@@ -1,10 +1,4 @@
 import { VehicleTracker } from "./lib/tracker.js";
-import {
-  getConfidenceThreshold,
-  getHistorySeconds,
-  getReportedSpeedMph,
-  getSpeedLimitMph,
-} from "./lib/settings.js";
 import { estimateRoadCalibration } from "./lib/perspective.js";
 import { transcodeToBrowserVideo } from "./lib/transcode.js";
 import { createYoloDetector } from "./lib/yolo.js";
@@ -14,6 +8,12 @@ const ASSUMED_WIDTHS_M = {
   motorcycle: 0.8,
   bus: 2.6,
   truck: 2.5,
+};
+
+const ANALYSIS_DEFAULTS = {
+  confidenceThreshold: 0.35,
+  historySeconds: 0.75,
+  speedLimitMph: 35,
 };
 
 const elements = {
@@ -26,9 +26,7 @@ const elements = {
   trackBackButton: document.querySelector("#track-back-button"),
   resultsBackButton: document.querySelector("#results-back-button"),
   buildVideoButton: document.querySelector("#build-video-button"),
-  demoButton: document.querySelector("#demo-button"),
   analyzeButton: document.querySelector("#analyze-button"),
-  samplePicker: document.querySelector("#sample-picker"),
   sourceVideo: document.querySelector("#source-video"),
   annotatedVideo: document.querySelector("#annotated-video"),
   annotatedVideoText: document.querySelector("#annotated-video-text"),
@@ -38,7 +36,6 @@ const elements = {
   sampleGallery: document.querySelector("#sample-gallery"),
   trackStatusText: document.querySelector("#track-status-text"),
   resultsStatusText: document.querySelector("#results-status-text"),
-  engineText: document.querySelector("#engine-text"),
   resultsNoteText: document.querySelector("#results-note-text"),
   trackCalibrationText: document.querySelector("#track-calibration-text"),
   resultsCalibrationText: document.querySelector("#results-calibration-text"),
@@ -64,7 +61,6 @@ const appState = {
   analysis: null,
   replaying: false,
   estimatedFps: 30,
-  sampleEveryFrames: 3,
   selectionFrame: null,
   selectionSamples: [],
   selectedTarget: null,
@@ -75,24 +71,6 @@ const appState = {
   stage: "load",
   cancelAnalysis: false,
 };
-
-const SAMPLE_CLIPS = [
-  {
-    key: "demo",
-    label: "Demo traffic",
-    src: "./assets/samples/traffic-demo.webm",
-  },
-  {
-    key: "bridge",
-    label: "Bridge traffic",
-    src: "./assets/samples/motorway-a40.webm",
-  },
-  {
-    key: "night",
-    label: "Night cars",
-    src: "./assets/samples/cars-night.webm",
-  },
-];
 
 window.__trafficReview = appState;
 
@@ -179,7 +157,6 @@ function renderStage() {
   elements.trackBackButton.textContent = isAnalyze ? "Back to pick" : "Back to load";
   elements.analyzeButton.style.display = isAnalyze ? "none" : "inline-flex";
   elements.trackCalibrationText.style.display = isAnalyze ? "none" : "inline";
-  elements.sampleGallery.style.display = isAnalyze ? "none" : "grid";
   elements.resultsStage.hidden = !isResults;
   elements.loadStage.hidden = appState.stage !== "load";
   elements.trackStage.hidden = !(isPick || isAnalyze);
@@ -203,22 +180,6 @@ function resetMetrics() {
   elements.decodeText.textContent = "Source: not loaded";
   setAnalyzeButtonEnabled(false);
   revokeAnnotatedVideo();
-}
-
-function renderSamplePicker() {
-  elements.samplePicker.innerHTML = SAMPLE_CLIPS
-    .map(
-      (clip) => `
-        <button type="button" data-sample-src="${clip.src}" data-sample-key="${clip.key}">${clip.label}</button>
-      `,
-    )
-    .join("");
-}
-
-function setActiveSampleButton(src) {
-  elements.samplePicker.querySelectorAll("button").forEach((button) => {
-    button.classList.toggle("active", Boolean(src) && button.dataset.sampleSrc === src);
-  });
 }
 
 function drawPreview(frameSource = null, annotations = null, selectedTrackId = null) {
@@ -464,10 +425,6 @@ async function estimateFps(video) {
   }
 }
 
-function chooseSamplingStep(fps) {
-  return 1;
-}
-
 function buildFrameTimes(duration, fps) {
   const safeFps = Math.max(1, fps);
   const frameStepS = 1 / safeFps;
@@ -513,7 +470,6 @@ async function ensureDetector() {
     preferredExecutionProviders: ["webgpu", "wasm"],
   });
   appState.detector = detector;
-  elements.engineText.value = `${detector.provider.toUpperCase()} in-browser inference`;
   return detector;
 }
 
@@ -626,8 +582,8 @@ async function analyzeSelectedVehicle() {
 
   const detector = await ensureDetector();
   const tracker = new VehicleTracker({
-    historySeconds: getHistorySeconds(),
-    speedLimitMph: getSpeedLimitMph(),
+    historySeconds: ANALYSIS_DEFAULTS.historySeconds,
+    speedLimitMph: ANALYSIS_DEFAULTS.speedLimitMph,
     speedUnit: "mph",
     roadAxis: appState.roadCalibration?.axis || null,
   });
@@ -653,7 +609,7 @@ async function analyzeSelectedVehicle() {
       throw new Error("Analysis canceled.");
     }
     frameContext.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
-    const detections = await detector.infer(frameCanvas, getConfidenceThreshold());
+    const detections = await detector.infer(frameCanvas, ANALYSIS_DEFAULTS.confidenceThreshold);
     if (appState.cancelAnalysis) {
       throw new Error("Analysis canceled.");
     }
@@ -739,20 +695,12 @@ async function analyzeSelectedVehicle() {
 
   const peakObserved = summary.length ? Math.max(...summary.map((row) => row.peak_speed)) : 0;
   const avgObserved = summary.length ? summary[0].avg_speed : 0;
-  const reportedSpeedMph = getReportedSpeedMph();
-  const speedDeltaMph = reportedSpeedMph > 0 && peakObserved > 0
-    ? Number((peakObserved - reportedSpeedMph).toFixed(2))
-    : null;
-
   appState.analysis = {
     fps: appState.estimatedFps,
-    sampleEveryFrames: appState.sampleEveryFrames,
     selectedTrackId,
     targetClass: appState.selectedTarget.label,
     summary,
     frameMetrics,
-    reportedSpeedMph: reportedSpeedMph > 0 ? reportedSpeedMph : null,
-    speedDeltaMph,
     calibrationDiagnostics: appState.roadCalibration
       ? {
         method: appState.roadCalibration.method,
@@ -773,17 +721,14 @@ async function analyzeSelectedVehicle() {
         end_s: selectedSummary.last_seen_s,
       }
       : null,
-    note:
-      "This tracks only the vehicle you clicked. Reported speed is shown only for comparison and is not used to calibrate the estimate.",
+    note: "This tracks only the vehicle you clicked. Review the replay and summary before you act on the estimate.",
   };
 
   elements.metricVehicles.textContent = summary.length ? "1" : "0";
   elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
   elements.metricAvg.textContent = `${avgObserved.toFixed(1)} mph`;
   updateCalibrationText(appState.roadCalibration);
-  elements.resultsNoteText.textContent = reportedSpeedMph > 0
-    ? `${appState.analysis.note} Peak differs from reported by ${speedDeltaMph?.toFixed(1) ?? "n/a"} mph.`
-    : appState.analysis.note;
+  elements.resultsNoteText.textContent = appState.analysis.note;
   if (selectedSummary) {
     elements.resultsNoteText.textContent += ` Track window: ${selectedSummary.first_seen_s.toFixed(2)}s to ${selectedSummary.last_seen_s.toFixed(2)}s.`;
   }
@@ -884,7 +829,6 @@ async function loadSelectedFile(file) {
     URL.revokeObjectURL(appState.objectUrl);
   }
   appState.decodeMode = "direct";
-  setActiveSampleButton(null);
   let activeFile = file;
   if (!file.type.includes("webm")) {
     setStatus("Converting the clip to WebM for browser playback and analysis.");
@@ -910,9 +854,6 @@ async function loadSelectedFile(file) {
 
   appState.sourceVideo = elements.sourceVideo;
   appState.estimatedFps = await estimateFps(elements.sourceVideo);
-  appState.sampleEveryFrames = chooseSamplingStep(appState.estimatedFps);
-  document.querySelector("#fps-override").value = String(appState.estimatedFps);
-  document.querySelector("#sample-every-frames").value = String(appState.sampleEveryFrames);
   elements.videoMeta.textContent =
     `${elements.sourceVideo.videoWidth}x${elements.sourceVideo.videoHeight} • ${elements.sourceVideo.duration.toFixed(2)}s • ~${appState.estimatedFps} fps • ${activeFile.name}`;
   elements.decodeText.textContent =
@@ -957,30 +898,6 @@ async function handleFile(file) {
     setStatus(error.message);
     elements.resultsNoteText.textContent = "Failed while loading the clip or finding vehicles.";
   }
-}
-
-async function loadDemoClip() {
-  await loadSampleClip(SAMPLE_CLIPS[0].src);
-}
-
-async function loadSampleClip(src) {
-  const response = await fetch(src);
-  if (!response.ok) {
-    throw new Error("The sample clip could not be loaded.");
-  }
-  setActiveSampleButton(src);
-  const blob = await response.blob();
-  const name = src.split("/").pop() || "sample.webm";
-  const file = new File([blob], name, {
-    type: blob.type || "video/webm",
-    lastModified: Date.now(),
-  });
-  elements.fileInput.files = (() => {
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
-    return transfer.files;
-  })();
-  await handleFile(file);
 }
 
 elements.previewCanvas.addEventListener("click", async (event) => {
@@ -1082,18 +999,6 @@ elements.fileInput.addEventListener("change", async (event) => {
   await handleFile(event.target.files?.[0]);
 });
 
-elements.demoButton.addEventListener("click", async () => {
-  elements.demoButton.disabled = true;
-  setStatus("Loading demo clip.");
-  try {
-    await loadDemoClip();
-  } catch (error) {
-    setStatus(error.message);
-  } finally {
-    elements.demoButton.disabled = false;
-  }
-});
-
 elements.trackBackButton.addEventListener("click", () => {
   if (appState.stage === "analyze") {
     appState.cancelAnalysis = true;
@@ -1109,20 +1014,6 @@ elements.resultsBackButton.addEventListener("click", () => {
 
 elements.buildVideoButton.addEventListener("click", async () => {
   await exportAnnotatedVideo();
-});
-
-elements.samplePicker.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-sample-src]");
-  if (!button) {
-    return;
-  }
-  setActiveSampleButton(button.dataset.sampleSrc);
-  setStatus(`Loading ${button.textContent || "sample"}.`);
-  try {
-    await loadSampleClip(button.dataset.sampleSrc);
-  } catch (error) {
-    setStatus(error.message);
-  }
 });
 
 elements.dropZone.addEventListener("dragover", (event) => {
@@ -1157,6 +1048,5 @@ elements.exportVideo.addEventListener("click", async () => {
 
 clearDownloads();
 resetMetrics();
-renderSamplePicker();
 setStage("load", { force: true });
-setStatus("Load the demo clip or upload a file.");
+setStatus("Drop a video file or choose one to start.");

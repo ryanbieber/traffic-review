@@ -16,6 +16,7 @@ process.on("unhandledRejection", (error) => {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
+const clipPath = path.join(repoRoot, "tests/fixtures/vs13/CitroenC4Picasso_80.mp4");
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -26,6 +27,114 @@ async function startServer() {
   });
   await delay(1000);
   return server;
+}
+
+async function prepareSmokeClip(page, sourcePath) {
+  await page.evaluate(() => {
+    if (document.querySelector("#smoke-source")) {
+      return;
+    }
+    const input = document.createElement("input");
+    input.type = "file";
+    input.id = "smoke-source";
+    input.style.display = "none";
+    document.body.appendChild(input);
+  });
+
+  const sourceInput = await page.$("#smoke-source");
+  await sourceInput.uploadFile(sourcePath);
+
+  await page.evaluate(async () => {
+    const sourceInput = document.querySelector("#smoke-source");
+    const appInput = document.querySelector("#video-file");
+    if (!sourceInput?.files?.[0] || !appInput) {
+      throw new Error("Smoke clip preparation failed.");
+    }
+
+    const sourceFile = sourceInput.files[0];
+    const sourceUrl = URL.createObjectURL(sourceFile);
+    const video = document.createElement("video");
+    video.src = sourceUrl;
+    video.muted = true;
+    video.playsInline = true;
+
+    await new Promise((resolve, reject) => {
+      const onLoaded = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Could not decode the smoke fixture."));
+      };
+      const cleanup = () => {
+        video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("error", onError);
+      };
+      video.addEventListener("loadedmetadata", onLoaded, { once: true });
+      video.addEventListener("error", onError, { once: true });
+      video.load();
+    });
+
+    const width = video.videoWidth || 960;
+    const height = video.videoHeight || 540;
+    const duration = Math.min(2.5, Math.max(1.2, video.duration || 2.5));
+    const fps = 15;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    const stream = canvas.captureStream(fps);
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    const chunks = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+    const stopped = new Promise((resolve) => {
+      recorder.onstop = resolve;
+    });
+    recorder.start();
+
+    const frames = Math.max(12, Math.ceil(duration * fps));
+    for (let index = 0; index < frames; index += 1) {
+      const timeS = Math.min(duration - 0.01, (duration * index) / Math.max(1, frames - 1));
+      await new Promise((resolve, reject) => {
+        const onSeeked = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error("Could not seek the smoke fixture."));
+        };
+        const cleanup = () => {
+          video.removeEventListener("seeked", onSeeked);
+          video.removeEventListener("error", onError);
+        };
+        video.addEventListener("seeked", onSeeked, { once: true });
+        video.addEventListener("error", onError, { once: true });
+        video.currentTime = timeS;
+      });
+
+      context.drawImage(video, 0, 0, width, height);
+      // Give MediaRecorder time to capture the updated frame.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 1000 / fps));
+    }
+
+    recorder.stop();
+    await stopped;
+    URL.revokeObjectURL(sourceUrl);
+
+    const blob = new Blob(chunks, { type: "video/webm" });
+    const file = new File([blob], "smoke.webm", { type: "video/webm" });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    appInput.files = transfer.files;
+    appInput.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 async function main() {
@@ -55,11 +164,8 @@ async function main() {
     const heading = await page.$eval("h1", (node) => node.textContent || "");
     assert.match(heading, /See the vehicle/i);
 
-    console.log("Loading demo clip");
-    await page.click("#demo-button");
-
-    const sampleButtons = await page.$$eval("#sample-picker [data-sample-src]", (nodes) => nodes.length);
-    assert.ok(sampleButtons >= 3);
+    console.log("Uploading clip");
+    await prepareSmokeClip(page, clipPath);
 
     console.log("Waiting for target-pick prompt");
     await page.waitForFunction(() => {

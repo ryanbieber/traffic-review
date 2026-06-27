@@ -16,9 +16,8 @@
         <div class="hero-copy">
           <div class="eyebrow">Traffic-camera review</div>
           <h1>See the vehicle, then judge the speed.</h1>
-          <p class="lead">Load the demo clip or upload your own video. The browser finds vehicles, lets you pick one, and shows rough speed metrics.</p>
+          <p class="lead">Drag in a traffic video or pick a file. The browser finds vehicles, lets you choose one, and shows rough speed metrics.</p>
           <div class="hero-points">
-            <span>Demo clip included</span>
             <span>Browser YOLO</span>
             <span>CSV + JSON + WebM</span>
           </div>
@@ -35,69 +34,21 @@
       <main class="workflow">
         <section id="stage-load" class="card stage-pane">
           <div class="section-head">
-            <h2>Load</h2>
-            <p>Open a clip, keep the controls compact, and move to the selection stage once the file is ready.</p>
+            <h2>Upload</h2>
+            <p>Drop a video onto the target below or use the file picker. Nothing else is exposed on this step.</p>
           </div>
 
           <form id="analysis-form" class="stage-grid">
             <div class="stage-column">
-              <div class="action-row">
-                <button id="demo-button" type="button" class="primary-btn">Load demo clip</button>
-              </div>
-
-              <div id="sample-picker" class="sample-picker"></div>
-
-              <div id="drop-zone" class="drop-zone compact">
+              <div id="drop-zone" class="drop-zone">
                 <strong>Drop video here</strong>
+                <span>or use the file picker below</span>
               </div>
 
               <label class="file-field">
-                <span>Or choose a file</span>
+                <span>Choose a video file</span>
                 <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
               </label>
-
-              <details class="advanced">
-                <summary>Advanced settings</summary>
-                <div class="grid two">
-                  <label>
-                    <span>Speed limit (mph)</span>
-                    <input id="speed-limit" type="number" min="1" step="1" value="35">
-                  </label>
-                  <label>
-                    <span>Reported speed (mph)</span>
-                    <input id="reported-speed" type="number" min="0" step="1" value="0">
-                  </label>
-                </div>
-
-                <div class="grid two">
-                  <label>
-                    <span>Confidence threshold</span>
-                    <input id="confidence-threshold" type="number" min="0.1" max="0.9" step="0.05" value="0.35">
-                  </label>
-                  <label>
-                    <span>Smoothing window (seconds)</span>
-                    <input id="history-seconds" type="number" min="0.2" max="2" step="0.05" value="0.75">
-                  </label>
-                </div>
-
-                <div class="grid two">
-                  <label>
-                    <span>Video FPS</span>
-                    <input id="fps-override" type="number" min="1" step="1" value="30">
-                  </label>
-                  <label>
-                    <span>Process every frame</span>
-                    <input id="sample-every-frames" type="number" min="1" step="1" value="1" readonly>
-                  </label>
-                </div>
-
-                <div class="grid two">
-                  <label>
-                    <span>Inference engine</span>
-                    <input id="engine-text" type="text" value="Model not loaded yet" readonly>
-                  </label>
-                </div>
-              </details>
             </div>
 
             <div class="stage-column stage-preview-column">
