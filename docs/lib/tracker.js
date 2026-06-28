@@ -63,8 +63,12 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
 
   const newest = track.history[track.history.length - 1];
   const relevant = track.history.filter((entry) => newest.timeS - entry.timeS <= historySeconds * 2.5);
+  const worldPoints = relevant.filter((entry) => Array.isArray(entry.worldPoint) && entry.worldPoint.every(Number.isFinite));
+  const worldSpanS = worldPoints.length >= 2 ? worldPoints[worldPoints.length - 1].timeS - worldPoints[0].timeS : 0;
 
-  const worldSlope = fitSlope(relevant, (entry) => entry.worldPoint?.[1]);
+  const worldSlope = worldPoints.length >= 2 && worldSpanS >= Math.min(0.2, historySeconds)
+    ? fitSlope(worldPoints, (entry) => entry.worldPoint[1])
+    : null;
   if (worldSlope !== null && Number.isFinite(worldSlope)) {
     return Math.abs(worldSlope) * track.speedMultiplier;
   }
@@ -77,6 +81,9 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
     for (let index = 1; index < relevant.length; index += 1) {
       const previous = relevant[index - 1];
       const current = relevant[index];
+      if (!Number.isFinite(current.metersPerPixel) || !Number.isFinite(previous.metersPerPixel)) {
+        continue;
+      }
       const deltaX = current.anchorPoint[0] - previous.anchorPoint[0];
       const deltaY = current.anchorPoint[1] - previous.anchorPoint[1];
       const axis = normalizeVector(roadAxis);
@@ -115,12 +122,16 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
     return null;
   }
 
-  if (newest.worldPoint && oldest.worldPoint) {
+  const useWorldDistance = newest.worldPoint && oldest.worldPoint && elapsed >= Math.min(0.2, historySeconds);
+  if (useWorldDistance) {
     distanceM = Math.hypot(
       newest.worldPoint[0] - oldest.worldPoint[0],
       newest.worldPoint[1] - oldest.worldPoint[1],
     );
   } else {
+    if (!Number.isFinite(newest.metersPerPixel) || !Number.isFinite(oldest.metersPerPixel)) {
+      return null;
+    }
     const deltaX = newest.anchorPoint[0] - oldest.anchorPoint[0];
     const deltaY = newest.anchorPoint[1] - oldest.anchorPoint[1];
     const axis = normalizeVector(roadAxis);
@@ -219,6 +230,7 @@ export class VehicleTracker {
       const track = this.tracks.get(detection.trackId);
       return {
         ...detection,
+        displayLabel: track.displayLabel,
         currentSpeed: track.currentSpeed,
         peakSpeed: track.peakSpeed,
         speedUnit: this.speedUnit,
@@ -232,6 +244,7 @@ export class VehicleTracker {
       .map((track) => ({
         track_id: track.id,
         label: track.label,
+        display_label: track.displayLabel,
         peak_speed: Number(track.peakSpeed.toFixed(2)),
         avg_speed: Number(
           (track.speedSamples.length
@@ -252,6 +265,7 @@ export class VehicleTracker {
       id: this.nextTrackId,
       classId: detection.classId,
       label: detection.label,
+      displayLabel: `${detection.label} #${this.nextTrackId}`,
       box: detection.box,
       currentSpeed: 0,
       peakSpeed: 0,

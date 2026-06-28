@@ -38,6 +38,7 @@ test("VehicleTracker keeps a stable track id and estimates zero speed for static
   const summary = tracker.getSummaryRows();
   assert.equal(summary.length, 1);
   assert.equal(summary[0].label, "bus");
+  assert.equal(summary[0].display_label, "bus #1");
   assert.equal(summary[0].speed_unit, "mph");
 });
 
@@ -104,4 +105,67 @@ test("VehicleTracker uses road-length world motion and ignores lateral jitter", 
   ], 1, measure);
 
   assert.ok(Math.abs(second[0].currentSpeed - 68) < 0.1);
+});
+
+test("VehicleTracker does not invent speed without calibrated scale", () => {
+  const tracker = new VehicleTracker({
+    historySeconds: 0.5,
+    speedLimitMph: 35,
+  });
+
+  const measure = (detection) => ({
+    anchorPoint: [(detection.box.x1 + detection.box.x2) / 2, detection.box.y2],
+    metersPerPixel: null,
+  });
+
+  tracker.update([
+    {
+      classId: 2,
+      label: "car",
+      score: 0.91,
+      box: { x1: 10, y1: 30, x2: 110, y2: 130 },
+    },
+  ], 0, measure);
+  const second = tracker.update([
+    {
+      classId: 2,
+      label: "car",
+      score: 0.92,
+      box: { x1: 20, y1: 30, x2: 120, y2: 130 },
+    },
+  ], 1, measure);
+
+  assert.equal(second[0].currentSpeed, 0);
+});
+
+test("VehicleTracker ignores world-point spikes on very short tracks", () => {
+  const tracker = new VehicleTracker({
+    historySeconds: 0.5,
+    speedLimitMph: 35,
+  });
+
+  const measure = (detection) => ({
+    anchorPoint: [(detection.box.x1 + detection.box.x2) / 2, detection.box.y2],
+    metersPerPixel: 0.05,
+    worldPoint: [detection.box.x1 < 20 ? 0 : 0, detection.box.x1 < 20 ? 0 : 25],
+  });
+
+  tracker.update([
+    {
+      classId: 2,
+      label: "car",
+      score: 0.91,
+      box: { x1: 10, y1: 30, x2: 110, y2: 130 },
+    },
+  ], 0, measure);
+  const second = tracker.update([
+    {
+      classId: 2,
+      label: "car",
+      score: 0.92,
+      box: { x1: 20, y1: 30, x2: 120, y2: 130 },
+    },
+  ], 0.05, measure);
+
+  assert.ok(second[0].currentSpeed < 100);
 });
