@@ -679,11 +679,11 @@ function summarizeCalibration(base) {
   const homography = base.homography || null;
   const projectPoint = homography
     ? (point) => {
-      try {
-        return projectHomographyPoint(homography, point);
-      } catch {
-        return null;
-      }
+        try {
+          return projectHomographyPoint(homography, point);
+        } catch {
+          return null;
+        }
     }
     : () => null;
 

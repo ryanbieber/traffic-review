@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import puppeteer from "puppeteer-core";
+
+import { startStaticServer, stopStaticServer } from "./static-server.mjs";
 
 process.on("exit", (code) => {
   console.log("PROCESS EXIT", code);
@@ -17,17 +17,6 @@ process.on("unhandledRejection", (error) => {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const clipPath = path.join(repoRoot, "tests/fixtures/vs13/CitroenC4Picasso_80.mp4");
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function startServer() {
-  const server = spawn("python3", ["-m", "http.server", "4173", "--directory", path.join(repoRoot, "docs")], {
-    stdio: "ignore",
-  });
-  await delay(1000);
-  return server;
-}
 
 async function prepareSmokeClip(page, sourcePath) {
   await page.evaluate(() => {
@@ -138,7 +127,7 @@ async function prepareSmokeClip(page, sourcePath) {
 }
 
 async function main() {
-  const server = await startServer();
+  const server = await startStaticServer(path.join(repoRoot, "docs"), 4173);
   let browser;
 
   try {
@@ -167,49 +156,9 @@ async function main() {
     console.log("Uploading clip");
     await prepareSmokeClip(page, clipPath);
 
-    console.log("Waiting for target-pick prompt");
     await page.waitForFunction(() => {
       const status = document.querySelector("#track-status-text");
-      return status && /click the vehicle/i.test(status.textContent);
-    }, { timeout: 180000 });
-
-    const sampleCount = await page.$$eval("#sample-gallery [data-sample-index]", (nodes) => nodes.length);
-    assert.ok(sampleCount > 0);
-
-    console.log("Clicking detected target");
-    const targetBox = await page.evaluate(() => {
-      const detections = window.__trafficReview.selectionFrame?.detections || [];
-      const detection = detections[1] || detections[0];
-      const canvas = document.querySelector("#preview-canvas");
-      return detection
-        ? { box: detection.box, width: canvas.width, height: canvas.height }
-        : null;
-    });
-    assert.ok(targetBox);
-    await page.$eval("#preview-canvas", (canvas, box) => {
-      canvas.scrollIntoView({ block: "center" });
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = rect.width / canvas.width;
-      const scaleY = rect.height / canvas.height;
-      const clientX = rect.left + ((box.x1 + box.x2) / 2) * scaleX;
-      const clientY = rect.top + ((box.y1 + box.y2) / 2) * scaleY;
-      canvas.dispatchEvent(new MouseEvent("click", {
-        bubbles: true,
-        clientX,
-        clientY,
-      }));
-    }, targetBox.box);
-
-    await page.waitForFunction(() => {
-      const button = document.querySelector("#analyze-button");
-      return button && !button.classList.contains("disabled");
-    }, { timeout: 180000 });
-
-    await page.click("#analyze-button");
-
-    await page.waitForFunction(() => {
-      const status = document.querySelector("#track-status-text");
-      return status && /analyzing/i.test(status.textContent);
+      return status && /scanning|analyzing|processed/i.test(status.textContent);
     }, { timeout: 30000 });
 
     await page.waitForFunction(() => {
@@ -227,17 +176,22 @@ async function main() {
       return video && video.src && video.src.length > 0;
     }, { timeout: 180000 });
 
-    const selectedTarget = await page.evaluate(() => window.__trafficReview.selectedTarget);
-    assert.ok(selectedTarget);
+    const analysis = await page.evaluate(() => ({
+      summaryLength: window.__trafficReview.analysis?.summary?.length || 0,
+      note: window.__trafficReview.analysis?.note || "",
+    }));
+    assert.ok(analysis.summaryLength > 0);
+    assert.match(analysis.note, /Every visible vehicle/i);
     const selectionText = await page.$eval("#selection-text", (node) => node.textContent || "");
-    assert.match(selectionText, /Selected vehicle:/i);
+    assert.match(selectionText, /Calibration:/i);
+    const progressWidth = await page.$eval("#progress-bar", (node) => node.style.width || "");
+    assert.equal(progressWidth, "100%");
     console.log("Smoke assertions passed");
   } finally {
     if (browser) {
       await browser.close();
     }
-    server.kill("SIGTERM");
-    await once(server, "exit");
+    await stopStaticServer(server);
   }
 }
 

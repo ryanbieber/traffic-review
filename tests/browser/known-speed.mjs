@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import puppeteer from "puppeteer-core";
 
 import { computeHomography } from "../../docs/lib/homography.js";
+import { startStaticServer, stopStaticServer } from "./static-server.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -26,10 +25,6 @@ const CASES = [
   { label: "35 mph", speedMph: 35, toleranceMph: 8 },
   { label: "68 mph", speedMph: 68, toleranceMph: 10 },
 ];
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function invertHomography(matrix) {
   const [
@@ -58,14 +53,6 @@ function invertHomography(matrix) {
     [B / det, E / det, H / det],
     [C / det, F / det, I / det],
   ];
-}
-
-async function startServer() {
-  const server = spawn("python3", ["-m", "http.server", "4173", "--directory", path.join(repoRoot, "docs")], {
-    stdio: "ignore",
-  });
-  await delay(1000);
-  return server;
 }
 
 async function loadPage(browser) {
@@ -204,6 +191,7 @@ async function injectFixtureCalibration(page, { worldToImage, imageToWorld }) {
     window.__trafficReview.roadCalibration = {
       method: "fixture-known",
       confidence: 1,
+      analysisOverride: true,
       axis: normalizedAxis,
       angleDeg: (Math.atan2(normalizedAxis[1], normalizedAxis[0]) * 180) / Math.PI,
       vanishingPoint: { x: centerTop[0], y: centerTop[1] },
@@ -431,44 +419,17 @@ async function runCase(page, speedMph, toleranceMph) {
   const exactImageToWorld = computeHomography(IMAGE_POINTS, ROAD_WIDTH_M, ROAD_LENGTH_M);
   const worldToImage = invertHomography(exactImageToWorld);
 
-  await uploadKnownSpeedClip(page, worldToImage, speedMph);
-
-  await page.waitForFunction(() => {
-    const status = document.querySelector("#track-status-text");
-    return status && /click the vehicle/i.test(status.textContent);
-  }, { timeout: 180000 });
-
-  const targetBox = await page.evaluate(() => {
-    const detections = window.__trafficReview.selectionFrame?.detections || [];
-    const detection = detections[0];
-    return detection ? detection.box : null;
-  });
-  assert.ok(targetBox);
-
-  await page.$eval("#preview-canvas", (canvas, box) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = rect.width / canvas.width;
-    const scaleY = rect.height / canvas.height;
-    const clientX = rect.left + ((box.x1 + box.x2) / 2) * scaleX;
-    const clientY = rect.top + ((box.y1 + box.y2) / 2) * scaleY;
-    canvas.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-      clientX,
-      clientY,
-    }));
-  }, targetBox);
-
   await injectFixtureCalibration(page, {
     worldToImage,
     imageToWorld: exactImageToWorld,
   });
 
-  await page.waitForFunction(() => {
-    const button = document.querySelector("#analyze-button");
-    return button && !button.classList.contains("disabled");
-  }, { timeout: 180000 });
+  await uploadKnownSpeedClip(page, worldToImage, speedMph);
 
-  await page.click("#analyze-button");
+  await page.waitForFunction(() => {
+    const status = document.querySelector("#track-status-text");
+    return status && /scanning|calibration ready|analyzing|processed/i.test(status.textContent || "");
+  }, { timeout: 180000 });
 
   await page.waitForFunction(() => {
     const status = document.querySelector("#results-status-text");
@@ -476,33 +437,35 @@ async function runCase(page, speedMph, toleranceMph) {
   }, { timeout: 180000 });
 
   const actual = await page.evaluate(() => {
-    const summary = window.__trafficReview.analysis?.summary?.[0];
+    const summary = window.__trafficReview.analysis?.summary || [];
     const calibration = window.__trafficReview.analysis?.calibrationDiagnostics || null;
     const analysis = window.__trafficReview.analysis || null;
     const note = document.querySelector("#results-note-text")?.textContent || "";
     return {
-      avgSpeed: summary?.avg_speed ?? null,
-      peakSpeed: summary?.peak_speed ?? null,
-      framesSeen: summary?.frames_seen ?? null,
-      firstSeenS: summary?.first_seen_s ?? null,
-      lastSeenS: summary?.last_seen_s ?? null,
+      summaryCount: summary.length,
+      avgSpeed: summary[0]?.avg_speed ?? null,
+      peakSpeed: summary[0]?.peak_speed ?? null,
+      framesSeen: summary[0]?.frames_seen ?? null,
       trackWindow: analysis?.trackWindow ?? null,
       calibration,
       note,
     };
   });
 
+  assert.ok(actual.summaryCount >= 1, `No tracks were produced for ${speedMph} mph case.`);
   assert.ok(Number.isFinite(actual.avgSpeed), `Missing average speed for ${speedMph} mph case.`);
   assert.ok(Number.isFinite(actual.peakSpeed), `Missing peak speed for ${speedMph} mph case.`);
   assert.ok(
     Math.abs(actual.avgSpeed - speedMph) <= toleranceMph,
     `${speedMph} mph case averaged ${actual.avgSpeed.toFixed(2)} mph, outside tolerance ±${toleranceMph} mph.`,
   );
-  assert.match(actual.note, /Peak differs from reported|This tracks only the vehicle/);
+  assert.match(actual.note, /Every visible vehicle/i);
+  const progressWidth = await page.$eval("#progress-bar", (node) => node.style.width || "");
+  assert.equal(progressWidth, "100%");
 }
 
 async function main() {
-  const server = await startServer();
+  const server = await startStaticServer(path.join(repoRoot, "docs"), 4173);
   let browser;
 
   try {
@@ -526,8 +489,7 @@ async function main() {
     if (browser) {
       await browser.close();
     }
-    server.kill("SIGTERM");
-    await once(server, "exit");
+    await stopStaticServer(server);
   }
 }
 

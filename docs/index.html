@@ -16,7 +16,7 @@
         <div class="hero-copy">
           <div class="eyebrow">Traffic-camera review</div>
           <h1>See the vehicle, then judge the speed.</h1>
-          <p class="lead">Drag in a traffic video or pick a file. The browser finds vehicles, lets you choose one, and shows rough speed metrics.</p>
+          <p class="lead">Drag in a traffic video or pick a file. The browser automatically calibrates, tracks every visible vehicle, and estimates speed.</p>
           <div class="hero-points">
             <span>Browser YOLO</span>
             <span>CSV + JSON + WebM</span>
@@ -26,16 +26,15 @@
 
       <nav class="stage-rail" aria-label="Workflow stages">
         <button type="button" class="stage-chip active" data-stage-target="load">1 Load</button>
-        <button type="button" class="stage-chip" data-stage-target="pick">2 Pick</button>
-        <button type="button" class="stage-chip" data-stage-target="analyze">3 Analyze</button>
-        <button type="button" class="stage-chip" data-stage-target="results">4 Results</button>
+        <button type="button" class="stage-chip" data-stage-target="analyze">2 Analyze</button>
+        <button type="button" class="stage-chip" data-stage-target="results">3 Results</button>
       </nav>
 
       <main class="workflow">
         <section id="stage-load" class="card stage-pane">
           <div class="section-head">
             <h2>Upload</h2>
-            <p>Drop a video onto the target below or use the file picker. Nothing else is exposed on this step.</p>
+            <p>Drop a video onto the target below or use the file picker. Analysis starts automatically after upload.</p>
           </div>
 
           <form id="analysis-form" class="stage-grid">
@@ -68,13 +67,12 @@
 
         <section id="stage-track" class="card stage-pane">
           <div class="section-head">
-            <h2 id="track-title">Pick the car</h2>
-            <p id="track-subtitle">Choose a sampled frame, click the vehicle, then analyze it.</p>
+            <h2 id="track-title">Upload and analyze</h2>
+            <p id="track-subtitle">The browser will calibrate and process the clip automatically, then label every visible vehicle with its estimated speed.</p>
           </div>
 
           <div class="stage-actions">
             <button id="track-back-button" type="button" class="ghost-btn">Back to load</button>
-            <button id="analyze-button" type="button" class="primary-btn disabled">Analyze selected vehicle</button>
           </div>
 
           <div class="stage-grid">
@@ -84,24 +82,13 @@
               </div>
 
               <div class="preview-meta">
-                <span id="selection-text">Selected vehicle: none</span>
+                <span id="selection-text">Calibration: automatic</span>
                 <span id="track-calibration-text">Not available yet.</span>
                 <span id="track-status-text">Load a clip to start.</span>
               </div>
 
               <div class="progress-track">
                 <div id="progress-bar"></div>
-              </div>
-            </div>
-
-            <div class="stage-column">
-              <div class="section-head compact">
-                <h3>Pick the car</h3>
-                <p>Choose a sample frame, then click the vehicle you want to track.</p>
-              </div>
-
-              <div id="sample-gallery" class="sample-gallery">
-                <p class="sample-placeholder">No sampled frames yet.</p>
               </div>
             </div>
           </div>
@@ -125,7 +112,7 @@
           </div>
 
           <div class="stage-actions">
-            <button id="results-back-button" type="button" class="ghost-btn">Back to pick</button>
+            <button id="results-back-button" type="button" class="ghost-btn">Back to load</button>
             <button id="build-video-button" type="button" class="primary-btn">Build annotated WebM</button>
           </div>
 
