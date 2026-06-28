@@ -75,7 +75,7 @@
             <button id="track-back-button" type="button" class="ghost-btn">Back to load</button>
           </div>
 
-          <div class="stage-grid">
+          <div class="stage-grid analysis-grid">
             <div class="stage-column">
               <div class="preview-shell">
                 <canvas id="preview-canvas" width="960" height="540"></canvas>
@@ -89,6 +89,21 @@
 
               <div class="progress-track">
                 <div id="progress-bar"></div>
+              </div>
+            </div>
+
+            <div class="stage-column">
+              <div class="section-head compact">
+                <h3>Rectified road plane</h3>
+                <p>Perspective corrected from the lane homography when the camera geometry is clear enough.</p>
+              </div>
+
+              <div class="preview-shell">
+                <canvas id="rectified-canvas" width="320" height="240"></canvas>
+              </div>
+
+              <div class="preview-meta">
+                <span id="rectified-text">Rectified view needs lane homography from visible markings.</span>
               </div>
             </div>
           </div>

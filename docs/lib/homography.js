@@ -85,6 +85,35 @@ export function computeHomography(imagePoints, realWidthM, realLengthM) {
   ];
 }
 
+export function invertHomography(homography) {
+  const [
+    [a, b, c],
+    [d, e, f],
+    [g, h, i],
+  ] = homography;
+
+  const A = (e * i) - (f * h);
+  const B = -((d * i) - (f * g));
+  const C = (d * h) - (e * g);
+  const D = -((b * i) - (c * h));
+  const E = (a * i) - (c * g);
+  const F = -((a * h) - (b * g));
+  const G = (b * f) - (c * e);
+  const H = -((a * f) - (c * d));
+  const I = (a * e) - (b * d);
+  const det = (a * A) + (b * B) + (c * C);
+
+  if (Math.abs(det) < 1e-12) {
+    throw new Error("Homography inversion failed: matrix is singular.");
+  }
+
+  return [
+    [A / det, D / det, G / det],
+    [B / det, E / det, H / det],
+    [C / det, F / det, I / det],
+  ];
+}
+
 export function projectPoint(homography, point) {
   const [x, y] = point;
   const w =

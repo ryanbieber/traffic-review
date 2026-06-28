@@ -201,7 +201,8 @@ h1 {
   background: rgba(180, 67, 47, 0.08);
 }
 
-#preview-canvas {
+#preview-canvas,
+#rectified-canvas {
   width: 100%;
   height: auto;
   border-radius: 18px;

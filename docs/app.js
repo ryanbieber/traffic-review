@@ -1,5 +1,6 @@
 import { VehicleTracker } from "./lib/tracker.js";
 import { estimateRoadCalibration } from "./lib/perspective.js";
+import { invertHomography, projectPoint as projectHomographyPoint } from "./lib/homography.js";
 import { transcodeToBrowserVideo } from "./lib/transcode.js";
 import { createYoloDetector } from "./lib/yolo.js";
 
@@ -20,6 +21,10 @@ const TRACK_COLORS = [
   "#0b5c8a",
 ];
 
+const RECTIFIED_PIXELS_PER_METER = 64;
+const RECTIFIED_MAX_WIDTH = 420;
+const RECTIFIED_MAX_HEIGHT = 780;
+
 const elements = {
   stageButtons: [...document.querySelectorAll("[data-stage-target]")],
   loadStage: document.querySelector("#stage-load"),
@@ -36,6 +41,7 @@ const elements = {
   fileInput: document.querySelector("#video-file"),
   dropZone: document.querySelector("#drop-zone"),
   previewCanvas: document.querySelector("#preview-canvas"),
+  rectifiedCanvas: document.querySelector("#rectified-canvas"),
   trackStatusText: document.querySelector("#track-status-text"),
   resultsStatusText: document.querySelector("#results-status-text"),
   resultsNoteText: document.querySelector("#results-note-text"),
@@ -51,6 +57,7 @@ const elements = {
   videoMeta: document.querySelector("#video-meta"),
   decodeText: document.querySelector("#decode-text"),
   selectionText: document.querySelector("#selection-text"),
+  rectifiedText: document.querySelector("#rectified-text"),
   metricVehicles: document.querySelector("#metric-vehicles"),
   metricPeak: document.querySelector("#metric-peak"),
   metricAvg: document.querySelector("#metric-avg"),
@@ -105,6 +112,290 @@ function clearDownloads() {
 
 function trackColor(trackId) {
   return TRACK_COLORS[Math.abs(Number(trackId) || 0) % TRACK_COLORS.length];
+}
+
+function sampleBilinear(pixels, width, height, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+
+  const clampedX = Math.max(0, Math.min(width - 1, x));
+  const clampedY = Math.max(0, Math.min(height - 1, y));
+  const x0 = Math.floor(clampedX);
+  const y0 = Math.floor(clampedY);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const dx = clampedX - x0;
+  const dy = clampedY - y0;
+
+  const read = (sampleX, sampleY) => {
+    const offset = (sampleY * width + sampleX) * 4;
+    return [
+      pixels[offset],
+      pixels[offset + 1],
+      pixels[offset + 2],
+      pixels[offset + 3],
+    ];
+  };
+
+  const topLeft = read(x0, y0);
+  const topRight = read(x1, y0);
+  const bottomLeft = read(x0, y1);
+  const bottomRight = read(x1, y1);
+
+  return [
+    (topLeft[0] * (1 - dx) * (1 - dy))
+      + (topRight[0] * dx * (1 - dy))
+      + (bottomLeft[0] * (1 - dx) * dy)
+      + (bottomRight[0] * dx * dy),
+    (topLeft[1] * (1 - dx) * (1 - dy))
+      + (topRight[1] * dx * (1 - dy))
+      + (bottomLeft[1] * (1 - dx) * dy)
+      + (bottomRight[1] * dx * dy),
+    (topLeft[2] * (1 - dx) * (1 - dy))
+      + (topRight[2] * dx * (1 - dy))
+      + (bottomLeft[2] * (1 - dx) * dy)
+      + (bottomRight[2] * dx * dy),
+    (topLeft[3] * (1 - dx) * (1 - dy))
+      + (topRight[3] * dx * (1 - dy))
+      + (bottomLeft[3] * (1 - dx) * dy)
+      + (bottomRight[3] * dx * dy),
+  ];
+}
+
+function getRectifiedViewConfig(calibration) {
+  if (!calibration?.homography) {
+    return null;
+  }
+  const laneWidthMeters = Number.isFinite(calibration.laneWidthMeters) && calibration.laneWidthMeters > 0
+    ? calibration.laneWidthMeters
+    : 3.6576;
+  const lengthMeters = Number.isFinite(calibration.projectedLengthMeters) && calibration.projectedLengthMeters > 0
+    ? calibration.projectedLengthMeters
+    : 12.0;
+  const rawWidth = laneWidthMeters * RECTIFIED_PIXELS_PER_METER;
+  const rawHeight = lengthMeters * RECTIFIED_PIXELS_PER_METER;
+  const scale = Math.min(
+    1,
+    RECTIFIED_MAX_WIDTH / rawWidth,
+    RECTIFIED_MAX_HEIGHT / rawHeight,
+  );
+  const width = Math.max(220, Math.round(rawWidth * scale));
+  const height = Math.max(320, Math.round(rawHeight * scale));
+  return {
+    width,
+    height,
+    laneWidthMeters,
+    lengthMeters,
+    pixelsPerMeter: width / laneWidthMeters,
+  };
+}
+
+function drawRectifiedGrid(context, config) {
+  const { width, height, laneWidthMeters, lengthMeters, pixelsPerMeter } = config;
+  context.save();
+  context.beginPath();
+  context.rect(0, 0, width, height);
+  context.clip();
+
+  context.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  context.lineWidth = 1;
+
+  for (let meter = 0; meter <= Math.ceil(laneWidthMeters); meter += 1) {
+    const x = Math.min(width, meter * pixelsPerMeter);
+    context.beginPath();
+    context.moveTo(x, 0);
+    context.lineTo(x, height);
+    context.stroke();
+  }
+
+  for (let meter = 0; meter <= Math.ceil(lengthMeters); meter += 1) {
+    const y = Math.min(height, meter * pixelsPerMeter);
+    context.beginPath();
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }
+
+  context.strokeStyle = "rgba(255, 255, 255, 0.28)";
+  context.setLineDash([10, 8]);
+  context.beginPath();
+  context.moveTo(width / 2, 0);
+  context.lineTo(width / 2, height);
+  context.stroke();
+  context.setLineDash([]);
+
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.font = "500 12px IBM Plex Mono";
+  context.fillText(`0m`, 8, 18);
+  context.fillText(`${laneWidthMeters.toFixed(1)}m`, Math.max(8, width - 72), 18);
+  context.fillText(`${lengthMeters.toFixed(1)}m`, 8, Math.max(18, height - 8));
+  context.restore();
+}
+
+function drawRectifiedAnnotations(context, annotations, config) {
+  const calibration = appState.roadCalibration;
+  if (!calibration?.homography) {
+    return;
+  }
+
+  context.save();
+  context.beginPath();
+  context.rect(0, 0, config.width, config.height);
+  context.clip();
+  context.font = "600 14px IBM Plex Mono";
+
+  annotations.forEach((item) => {
+    const color = trackColor(item.trackId);
+    const projectedCorners = [
+      [item.box.x1, item.box.y1],
+      [item.box.x2, item.box.y1],
+      [item.box.x2, item.box.y2],
+      [item.box.x1, item.box.y2],
+    ]
+      .map((point) => {
+        try {
+          return projectHomographyPoint(calibration.homography, point);
+        } catch {
+          return null;
+        }
+      })
+      .filter((point) => Array.isArray(point) && point.every(Number.isFinite))
+      .map(([x, y]) => [x * config.pixelsPerMeter, y * config.pixelsPerMeter]);
+
+    if (projectedCorners.length === 4) {
+      context.globalAlpha = item.flagged ? 1 : 0.92;
+      context.strokeStyle = color;
+      context.fillStyle = `${color}22`;
+      context.lineWidth = item.flagged ? 4 : 2;
+      context.beginPath();
+      projectedCorners.forEach(([x, y], index) => {
+        if (index === 0) {
+          context.moveTo(x, y);
+        } else {
+          context.lineTo(x, y);
+        }
+      });
+      context.closePath();
+      context.fill();
+      context.stroke();
+    }
+
+    const labelAnchor = (() => {
+      try {
+        return projectHomographyPoint(calibration.homography, [
+          (item.box.x1 + item.box.x2) / 2,
+          item.box.y2,
+        ]);
+      } catch {
+        return null;
+      }
+    })();
+
+    if (labelAnchor && labelAnchor.every(Number.isFinite)) {
+      const [x, y] = [labelAnchor[0] * config.pixelsPerMeter, labelAnchor[1] * config.pixelsPerMeter];
+      const speedText = Number.isFinite(item.currentSpeed) ? ` ${item.currentSpeed.toFixed(1)} mph` : "";
+      const text = `${item.displayLabel || item.label}${speedText}`;
+      const textWidth = context.measureText(text).width;
+      const textX = Math.max(0, Math.min(config.width - textWidth - 12, x - (textWidth / 2) - 4));
+      const textY = Math.max(20, Math.min(config.height - 8, y - 10));
+      context.fillStyle = color;
+      context.fillRect(textX, textY - 16, textWidth + 12, 22);
+      context.fillStyle = "#fff";
+      context.fillText(text, textX + 6, textY);
+    }
+    context.globalAlpha = 1;
+  });
+
+  context.restore();
+}
+
+function drawRectifiedPreview(frameSource = null, annotations = null) {
+  const canvas = elements.rectifiedCanvas;
+  const context = canvas.getContext("2d");
+  const calibration = appState.roadCalibration;
+  const config = getRectifiedViewConfig(calibration);
+
+  if (!frameSource || !config) {
+    canvas.width = 320;
+    canvas.height = 240;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#13211c";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(255, 255, 255, 0.82)";
+    context.font = "600 16px Space Grotesk";
+    context.fillText("Rectified road plane", 18, 38);
+    context.font = "500 13px IBM Plex Mono";
+    context.fillText(
+      calibration?.homography
+        ? "Waiting for a frame to project."
+        : "Lane homography unavailable yet.",
+      18,
+      68,
+    );
+    context.fillText(
+      "The original camera view stays visible beside this panel.",
+      18,
+      92,
+    );
+    elements.rectifiedText.textContent = calibration?.homography
+      ? "Rectified view will appear after the next sampled frame."
+      : "Rectified view needs lane homography from visible markings.";
+    return;
+  }
+
+  canvas.width = config.width;
+  canvas.height = config.height;
+
+  const sourceContext = frameSource.getContext("2d", { willReadFrequently: true });
+  const sourcePixels = sourceContext.getImageData(0, 0, frameSource.width, frameSource.height).data;
+  const inverseHomography = calibration.inverseHomography
+    || (calibration.inverseHomography = invertHomography(calibration.homography));
+  const imageData = context.createImageData(config.width, config.height);
+  const destPixels = imageData.data;
+
+  for (let y = 0; y < config.height; y += 1) {
+    const worldY = (y / Math.max(1, config.height - 1)) * config.lengthMeters;
+    for (let x = 0; x < config.width; x += 1) {
+      const worldX = (x / Math.max(1, config.width - 1)) * config.laneWidthMeters;
+      let sourcePoint = null;
+      try {
+        sourcePoint = projectHomographyPoint(inverseHomography, [worldX, worldY]);
+      } catch {
+        sourcePoint = null;
+      }
+
+      const offset = (y * config.width + x) * 4;
+      if (!sourcePoint || !sourcePoint.every(Number.isFinite)) {
+        destPixels[offset] = 19;
+        destPixels[offset + 1] = 33;
+        destPixels[offset + 2] = 28;
+        destPixels[offset + 3] = 255;
+        continue;
+      }
+
+      const sample = sampleBilinear(sourcePixels, frameSource.width, frameSource.height, sourcePoint[0], sourcePoint[1]);
+      if (!sample) {
+        destPixels[offset] = 19;
+        destPixels[offset + 1] = 33;
+        destPixels[offset + 2] = 28;
+        destPixels[offset + 3] = 255;
+        continue;
+      }
+
+      destPixels[offset] = Math.round(sample[0]);
+      destPixels[offset + 1] = Math.round(sample[1]);
+      destPixels[offset + 2] = Math.round(sample[2]);
+      destPixels[offset + 3] = Math.round(sample[3]);
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+  drawRectifiedGrid(context, config);
+  if (annotations?.length) {
+    drawRectifiedAnnotations(context, annotations, config);
+  }
+  elements.rectifiedText.textContent = `Rectified lane patch: ${config.laneWidthMeters.toFixed(1)}m wide × ${config.lengthMeters.toFixed(1)}m long`;
 }
 
 function canEnterStage(stage) {
@@ -171,8 +462,13 @@ function resetMetrics() {
   elements.trackStatusText.textContent = "Load a clip to start.";
   elements.resultsStatusText.textContent = "Waiting for analysis.";
   elements.selectionText.textContent = "Calibration: automatic";
+  elements.rectifiedText.textContent = "Rectified view needs lane homography from visible markings.";
   elements.decodeText.textContent = "Source: not loaded";
   revokeAnnotatedVideo();
+  if (elements.rectifiedCanvas) {
+    const context = elements.rectifiedCanvas.getContext("2d");
+    context.clearRect(0, 0, elements.rectifiedCanvas.width, elements.rectifiedCanvas.height);
+  }
 }
 
 function drawPreview(frameSource = null, annotations = null) {
@@ -219,6 +515,11 @@ function drawPreview(frameSource = null, annotations = null) {
     context.fillText(text, item.box.x1 + 8, Math.max(18, item.box.y1 - 10));
     context.globalAlpha = 1;
   });
+}
+
+function renderReviewFrame(frameSource = null, annotations = null) {
+  drawPreview(frameSource, annotations);
+  drawRectifiedPreview(frameSource, annotations);
 }
 
 function setDownload(anchor, name, content, type) {
@@ -561,7 +862,7 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
       detections: annotated.map((item) => ({ ...item })),
     });
 
-    drawPreview(frameCanvas, annotated);
+    renderReviewFrame(frameCanvas, annotated);
     setStatus(`Processed ${index + 1}/${frameTimes.length} frames.`);
     setProgress(progressOffset + (progressScale * ((index + 1) / frameTimes.length)));
   }
@@ -658,12 +959,17 @@ async function replayAnnotated() {
   }
   appState.replaying = true;
   const frameDelay = (1 / Math.max(1, appState.estimatedFps)) * 1000;
+  const playbackFrameCanvas = document.createElement("canvas");
+  playbackFrameCanvas.width = appState.sourceVideo.videoWidth;
+  playbackFrameCanvas.height = appState.sourceVideo.videoHeight;
+  const playbackFrameContext = playbackFrameCanvas.getContext("2d");
   for (const sample of appState.analysis.samples) {
     if (!appState.replaying) {
       break;
     }
     await seekVideo(appState.sourceVideo, sample.timeS);
-    drawPreview(null, sample.detections);
+    playbackFrameContext.drawImage(appState.sourceVideo, 0, 0, playbackFrameCanvas.width, playbackFrameCanvas.height);
+    renderReviewFrame(playbackFrameCanvas, sample.detections);
     setStatus(`Replay ${sample.timeS.toFixed(2)}s`);
     // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, frameDelay));
@@ -690,9 +996,14 @@ async function exportAnnotatedVideo() {
   recorder.start();
 
   const frameDelay = (1 / Math.max(1, appState.estimatedFps)) * 1000;
+  const playbackFrameCanvas = document.createElement("canvas");
+  playbackFrameCanvas.width = appState.sourceVideo.videoWidth;
+  playbackFrameCanvas.height = appState.sourceVideo.videoHeight;
+  const playbackFrameContext = playbackFrameCanvas.getContext("2d");
   for (const sample of appState.analysis.samples) {
     await seekVideo(appState.sourceVideo, sample.timeS);
-    drawPreview(null, sample.detections);
+    playbackFrameContext.drawImage(appState.sourceVideo, 0, 0, playbackFrameCanvas.width, playbackFrameCanvas.height);
+    renderReviewFrame(playbackFrameCanvas, sample.detections);
     // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, frameDelay));
   }
@@ -770,11 +1081,14 @@ async function prepareAndAnalyze(file) {
   );
   const calibrationOverride = appState.roadCalibration?.analysisOverride ? appState.roadCalibration : null;
   appState.roadCalibration = calibrationOverride || automaticCalibration;
+  if (appState.roadCalibration?.homography) {
+    appState.roadCalibration.inverseHomography = invertHomography(appState.roadCalibration.homography);
+  }
   if (!hasSpeedCalibration(appState.roadCalibration)) {
     throw new Error("Lane markings were not clear enough for automatic speed estimates.");
   }
   elements.selectionText.textContent = "Calibration: automatic";
-  drawPreview(appState.calibrationFrame.frameCanvas, appState.calibrationFrame.detections);
+  renderReviewFrame(appState.calibrationFrame.frameCanvas, appState.calibrationFrame.detections);
   updateCalibrationText(appState.roadCalibration);
   setProgress(0.2);
   setStatus("Calibration ready. Analyzing every visible vehicle.");

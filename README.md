@@ -9,6 +9,7 @@ A GitHub Pages-compatible web app for reviewing traffic-camera footage with brow
 - Loads a YOLOv8 ONNX model directly in the browser through ONNX Runtime Web.
 - Scans the clip automatically after a file is dropped or selected.
 - Automatically calibrates, tracks every visible vehicle, and estimates speed from lane-marking calibration and road-plane motion.
+- Shows the original camera frame and a perspective-rectified road-plane view side by side when lane homography is available.
 - Exports a summary CSV, JSON analysis record, and an annotated WebM review clip.
 
 ## Important limitation
