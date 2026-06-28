@@ -95,7 +95,7 @@
             <div class="stage-column">
               <div class="section-head compact">
                 <h3>Rectified road plane</h3>
-                <p>Perspective corrected from the lane homography when the camera geometry is clear enough.</p>
+                <p>Perspective corrected from the lane homography, with a shared metric fallback when the full warp is unavailable.</p>
               </div>
 
               <div class="preview-shell">
@@ -103,7 +103,7 @@
               </div>
 
               <div class="preview-meta">
-                <span id="rectified-text">Rectified view needs lane homography from visible markings.</span>
+                <span id="rectified-text">Rectified view needs lane calibration from visible markings.</span>
               </div>
             </div>
           </div>

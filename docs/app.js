@@ -1,6 +1,5 @@
 import { VehicleTracker } from "./lib/tracker.js";
 import { estimateRoadCalibration } from "./lib/perspective.js";
-import { invertHomography, projectPoint as projectHomographyPoint } from "./lib/homography.js";
 import { transcodeToBrowserVideo } from "./lib/transcode.js";
 import { createYoloDetector } from "./lib/yolo.js";
 
@@ -114,57 +113,8 @@ function trackColor(trackId) {
   return TRACK_COLORS[Math.abs(Number(trackId) || 0) % TRACK_COLORS.length];
 }
 
-function sampleBilinear(pixels, width, height, x, y) {
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return null;
-  }
-
-  const clampedX = Math.max(0, Math.min(width - 1, x));
-  const clampedY = Math.max(0, Math.min(height - 1, y));
-  const x0 = Math.floor(clampedX);
-  const y0 = Math.floor(clampedY);
-  const x1 = Math.min(width - 1, x0 + 1);
-  const y1 = Math.min(height - 1, y0 + 1);
-  const dx = clampedX - x0;
-  const dy = clampedY - y0;
-
-  const read = (sampleX, sampleY) => {
-    const offset = (sampleY * width + sampleX) * 4;
-    return [
-      pixels[offset],
-      pixels[offset + 1],
-      pixels[offset + 2],
-      pixels[offset + 3],
-    ];
-  };
-
-  const topLeft = read(x0, y0);
-  const topRight = read(x1, y0);
-  const bottomLeft = read(x0, y1);
-  const bottomRight = read(x1, y1);
-
-  return [
-    (topLeft[0] * (1 - dx) * (1 - dy))
-      + (topRight[0] * dx * (1 - dy))
-      + (bottomLeft[0] * (1 - dx) * dy)
-      + (bottomRight[0] * dx * dy),
-    (topLeft[1] * (1 - dx) * (1 - dy))
-      + (topRight[1] * dx * (1 - dy))
-      + (bottomLeft[1] * (1 - dx) * dy)
-      + (bottomRight[1] * dx * dy),
-    (topLeft[2] * (1 - dx) * (1 - dy))
-      + (topRight[2] * dx * (1 - dy))
-      + (bottomLeft[2] * (1 - dx) * dy)
-      + (bottomRight[2] * dx * dy),
-    (topLeft[3] * (1 - dx) * (1 - dy))
-      + (topRight[3] * dx * (1 - dy))
-      + (bottomLeft[3] * (1 - dx) * dy)
-      + (bottomRight[3] * dx * dy),
-  ];
-}
-
 function getRectifiedViewConfig(calibration) {
-  if (!calibration?.homography) {
+  if (!calibration?.projectPoint) {
     return null;
   }
   const laneWidthMeters = Number.isFinite(calibration.laneWidthMeters) && calibration.laneWidthMeters > 0
@@ -172,9 +122,14 @@ function getRectifiedViewConfig(calibration) {
     : 3.6576;
   const lengthMeters = Number.isFinite(calibration.projectedLengthMeters) && calibration.projectedLengthMeters > 0
     ? calibration.projectedLengthMeters
-    : 12.0;
-  const rawWidth = laneWidthMeters * RECTIFIED_PIXELS_PER_METER;
-  const rawHeight = lengthMeters * RECTIFIED_PIXELS_PER_METER;
+    : Math.max(24, (calibration.referenceScaleMPerPx || 0.03) * (calibration.sourceHeight || 540) * 0.8);
+  const mode = calibration.homography ? "homography" : "metric";
+  const displayWidthMeters = mode === "homography"
+    ? laneWidthMeters
+    : laneWidthMeters * 3;
+  const displayHeightMeters = lengthMeters;
+  const rawWidth = displayWidthMeters * RECTIFIED_PIXELS_PER_METER;
+  const rawHeight = displayHeightMeters * RECTIFIED_PIXELS_PER_METER;
   const scale = Math.min(
     1,
     RECTIFIED_MAX_WIDTH / rawWidth,
@@ -183,26 +138,57 @@ function getRectifiedViewConfig(calibration) {
   const width = Math.max(220, Math.round(rawWidth * scale));
   const height = Math.max(320, Math.round(rawHeight * scale));
   return {
+    mode,
     width,
     height,
     laneWidthMeters,
     lengthMeters,
-    pixelsPerMeter: width / laneWidthMeters,
+    displayWidthMeters,
+    pixelsPerMeter: width / displayWidthMeters,
   };
 }
 
 function drawRectifiedGrid(context, config) {
-  const { width, height, laneWidthMeters, lengthMeters, pixelsPerMeter } = config;
+  const {
+    mode,
+    width,
+    height,
+    laneWidthMeters,
+    displayWidthMeters,
+    lengthMeters,
+    pixelsPerMeter,
+  } = config;
   context.save();
   context.beginPath();
   context.rect(0, 0, width, height);
   context.clip();
+  context.fillStyle = "#13211c";
+  context.fillRect(0, 0, width, height);
+
+  context.fillStyle = "rgba(255, 255, 255, 0.05)";
+  context.fillRect(0, 0, width, height);
+
+  const roadLeftMeters = mode === "metric" ? -(laneWidthMeters * 1.5) : 0;
+  const roadRightMeters = mode === "metric" ? (laneWidthMeters * 1.5) : laneWidthMeters;
+  const roadLeftPx = mode === "metric"
+    ? (width / 2) + (roadLeftMeters * pixelsPerMeter)
+    : roadLeftMeters * pixelsPerMeter;
+  const roadRightPx = mode === "metric"
+    ? (width / 2) + (roadRightMeters * pixelsPerMeter)
+    : roadRightMeters * pixelsPerMeter;
+
+  context.fillStyle = "rgba(255, 255, 255, 0.04)";
+  context.fillRect(Math.min(roadLeftPx, roadRightPx), 0, Math.abs(roadRightPx - roadLeftPx), height);
 
   context.strokeStyle = "rgba(255, 255, 255, 0.12)";
   context.lineWidth = 1;
 
-  for (let meter = 0; meter <= Math.ceil(laneWidthMeters); meter += 1) {
-    const x = Math.min(width, meter * pixelsPerMeter);
+  const xStart = mode === "metric" ? roadLeftMeters : 0;
+  const xEnd = mode === "metric" ? roadRightMeters : laneWidthMeters;
+  for (let meter = Math.floor(xStart); meter <= Math.ceil(xEnd); meter += 1) {
+    const x = mode === "metric"
+      ? (width / 2) + (meter * pixelsPerMeter)
+      : Math.min(width, meter * pixelsPerMeter);
     context.beginPath();
     context.moveTo(x, 0);
     context.lineTo(x, height);
@@ -220,8 +206,8 @@ function drawRectifiedGrid(context, config) {
   context.strokeStyle = "rgba(255, 255, 255, 0.28)";
   context.setLineDash([10, 8]);
   context.beginPath();
-  context.moveTo(width / 2, 0);
-  context.lineTo(width / 2, height);
+  context.moveTo(mode === "metric" ? width / 2 : (laneWidthMeters / 2) * pixelsPerMeter, 0);
+  context.lineTo(mode === "metric" ? width / 2 : (laneWidthMeters / 2) * pixelsPerMeter, height);
   context.stroke();
   context.setLineDash([]);
 
@@ -235,7 +221,7 @@ function drawRectifiedGrid(context, config) {
 
 function drawRectifiedAnnotations(context, annotations, config) {
   const calibration = appState.roadCalibration;
-  if (!calibration?.homography) {
+  if (!calibration?.projectPoint) {
     return;
   }
 
@@ -255,13 +241,21 @@ function drawRectifiedAnnotations(context, annotations, config) {
     ]
       .map((point) => {
         try {
-          return projectHomographyPoint(calibration.homography, point);
+          return calibration.projectPoint(point);
         } catch {
           return null;
         }
       })
       .filter((point) => Array.isArray(point) && point.every(Number.isFinite))
-      .map(([x, y]) => [x * config.pixelsPerMeter, y * config.pixelsPerMeter]);
+      .map(([x, y]) => (config.mode === "metric"
+        ? [
+          (config.width / 2) + (x * config.pixelsPerMeter),
+          y * config.pixelsPerMeter,
+        ]
+        : [
+          x * config.pixelsPerMeter,
+          y * config.pixelsPerMeter,
+        ]));
 
     if (projectedCorners.length === 4) {
       context.globalAlpha = item.flagged ? 1 : 0.92;
@@ -283,7 +277,7 @@ function drawRectifiedAnnotations(context, annotations, config) {
 
     const labelAnchor = (() => {
       try {
-        return projectHomographyPoint(calibration.homography, [
+        return calibration.projectPoint([
           (item.box.x1 + item.box.x2) / 2,
           item.box.y2,
         ]);
@@ -293,7 +287,12 @@ function drawRectifiedAnnotations(context, annotations, config) {
     })();
 
     if (labelAnchor && labelAnchor.every(Number.isFinite)) {
-      const [x, y] = [labelAnchor[0] * config.pixelsPerMeter, labelAnchor[1] * config.pixelsPerMeter];
+      const [x, y] = config.mode === "metric"
+        ? [
+          (config.width / 2) + (labelAnchor[0] * config.pixelsPerMeter),
+          labelAnchor[1] * config.pixelsPerMeter,
+        ]
+        : [labelAnchor[0] * config.pixelsPerMeter, labelAnchor[1] * config.pixelsPerMeter];
       const speedText = Number.isFinite(item.currentSpeed) ? ` ${item.currentSpeed.toFixed(1)} mph` : "";
       const text = `${item.displayLabel || item.label}${speedText}`;
       const textWidth = context.measureText(text).width;
@@ -316,7 +315,7 @@ function drawRectifiedPreview(frameSource = null, annotations = null) {
   const calibration = appState.roadCalibration;
   const config = getRectifiedViewConfig(calibration);
 
-  if (!frameSource || !config) {
+  if (!config) {
     canvas.width = 320;
     canvas.height = 240;
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -329,7 +328,7 @@ function drawRectifiedPreview(frameSource = null, annotations = null) {
     context.fillText(
       calibration?.homography
         ? "Waiting for a frame to project."
-        : "Lane homography unavailable yet.",
+        : "Lane calibration unavailable yet.",
       18,
       68,
     );
@@ -338,64 +337,21 @@ function drawRectifiedPreview(frameSource = null, annotations = null) {
       18,
       92,
     );
-    elements.rectifiedText.textContent = calibration?.homography
-      ? "Rectified view will appear after the next sampled frame."
-      : "Rectified view needs lane homography from visible markings.";
+    elements.rectifiedText.textContent = "Rectified view needs lane calibration from visible markings.";
     return;
   }
 
   canvas.width = config.width;
   canvas.height = config.height;
 
-  const sourceContext = frameSource.getContext("2d", { willReadFrequently: true });
-  const sourcePixels = sourceContext.getImageData(0, 0, frameSource.width, frameSource.height).data;
-  const inverseHomography = calibration.inverseHomography
-    || (calibration.inverseHomography = invertHomography(calibration.homography));
-  const imageData = context.createImageData(config.width, config.height);
-  const destPixels = imageData.data;
-
-  for (let y = 0; y < config.height; y += 1) {
-    const worldY = (y / Math.max(1, config.height - 1)) * config.lengthMeters;
-    for (let x = 0; x < config.width; x += 1) {
-      const worldX = (x / Math.max(1, config.width - 1)) * config.laneWidthMeters;
-      let sourcePoint = null;
-      try {
-        sourcePoint = projectHomographyPoint(inverseHomography, [worldX, worldY]);
-      } catch {
-        sourcePoint = null;
-      }
-
-      const offset = (y * config.width + x) * 4;
-      if (!sourcePoint || !sourcePoint.every(Number.isFinite)) {
-        destPixels[offset] = 19;
-        destPixels[offset + 1] = 33;
-        destPixels[offset + 2] = 28;
-        destPixels[offset + 3] = 255;
-        continue;
-      }
-
-      const sample = sampleBilinear(sourcePixels, frameSource.width, frameSource.height, sourcePoint[0], sourcePoint[1]);
-      if (!sample) {
-        destPixels[offset] = 19;
-        destPixels[offset + 1] = 33;
-        destPixels[offset + 2] = 28;
-        destPixels[offset + 3] = 255;
-        continue;
-      }
-
-      destPixels[offset] = Math.round(sample[0]);
-      destPixels[offset + 1] = Math.round(sample[1]);
-      destPixels[offset + 2] = Math.round(sample[2]);
-      destPixels[offset + 3] = Math.round(sample[3]);
-    }
-  }
-
-  context.putImageData(imageData, 0, 0);
+  context.clearRect(0, 0, config.width, config.height);
   drawRectifiedGrid(context, config);
   if (annotations?.length) {
     drawRectifiedAnnotations(context, annotations, config);
   }
-  elements.rectifiedText.textContent = `Rectified lane patch: ${config.laneWidthMeters.toFixed(1)}m wide × ${config.lengthMeters.toFixed(1)}m long`;
+  elements.rectifiedText.textContent = calibration?.homography
+    ? `Rectified lane patch: ${config.laneWidthMeters.toFixed(1)}m wide × ${config.lengthMeters.toFixed(1)}m long`
+    : `Metric road plane: shared road transform over a ${config.laneWidthMeters.toFixed(1)}m lane`;
 }
 
 function canEnterStage(stage) {
@@ -462,7 +418,7 @@ function resetMetrics() {
   elements.trackStatusText.textContent = "Load a clip to start.";
   elements.resultsStatusText.textContent = "Waiting for analysis.";
   elements.selectionText.textContent = "Calibration: automatic";
-  elements.rectifiedText.textContent = "Rectified view needs lane homography from visible markings.";
+  elements.rectifiedText.textContent = "Rectified view needs lane calibration from visible markings.";
   elements.decodeText.textContent = "Source: not loaded";
   revokeAnnotatedVideo();
   if (elements.rectifiedCanvas) {
@@ -1081,9 +1037,6 @@ async function prepareAndAnalyze(file) {
   );
   const calibrationOverride = appState.roadCalibration?.analysisOverride ? appState.roadCalibration : null;
   appState.roadCalibration = calibrationOverride || automaticCalibration;
-  if (appState.roadCalibration?.homography) {
-    appState.roadCalibration.inverseHomography = invertHomography(appState.roadCalibration.homography);
-  }
   if (!hasSpeedCalibration(appState.roadCalibration)) {
     throw new Error("Lane markings were not clear enough for automatic speed estimates.");
   }

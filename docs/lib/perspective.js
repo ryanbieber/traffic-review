@@ -672,8 +672,8 @@ function summarizeCalibration(base) {
       return null;
     }
     const vpY = base.vanishingPoint.y / scaleY;
-    const denominator = Math.max(24, y - vpY);
-    const numerator = Math.max(24, referenceY - vpY);
+    const denominator = Math.max(24, referenceY - vpY);
+    const numerator = Math.max(24, y - vpY);
     return base.referenceScaleMPerPx * (numerator / denominator);
   };
   const homography = base.homography || null;
@@ -685,7 +685,24 @@ function summarizeCalibration(base) {
           return null;
         }
     }
-    : () => null;
+    : (point) => {
+      if (!Number.isFinite(base.referenceScaleMPerPx) || base.referenceScaleMPerPx <= 0) {
+        return null;
+      }
+      if (!Array.isArray(point) || point.length < 2) {
+        return null;
+      }
+      const [x, y] = point;
+      const scale = scaleAtY(y) || base.referenceScaleMPerPx;
+      const axis = roadAxis;
+      const vpY = base.vanishingPoint.y / scaleY;
+      const centerX = Math.abs(axis[1]) > 1e-6
+        ? (base.vanishingPoint.x / scaleX) + ((y - vpY) * axis[0] / axis[1])
+        : (base.sourceWidth / 2);
+      const lateralMeters = (x - centerX) * scale;
+      const longitudinalMeters = ((base.referenceY / scaleY) - y) * scale;
+      return [lateralMeters, longitudinalMeters];
+    };
 
   return {
     method: base.method,

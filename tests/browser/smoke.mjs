@@ -184,6 +184,9 @@ async function main() {
     assert.match(analysis.note, /Every visible vehicle/i);
     const selectionText = await page.$eval("#selection-text", (node) => node.textContent || "");
     assert.match(selectionText, /Calibration:/i);
+    const rectifiedText = await page.$eval("#rectified-text", (node) => node.textContent || "");
+    assert.match(rectifiedText, /(road plane|lane patch)/i);
+    assert.doesNotMatch(rectifiedText, /unavailable/i);
     const progressWidth = await page.$eval("#progress-bar", (node) => node.style.width || "");
     assert.equal(progressWidth, "100%");
     console.log("Smoke assertions passed");
