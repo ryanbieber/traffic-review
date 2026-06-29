@@ -776,6 +776,46 @@ function pickCalibrationTarget(detections) {
     })[0] || null;
 }
 
+function median(values) {
+  if (!values.length) {
+    return null;
+  }
+  const ordered = values.slice().sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  if (ordered.length % 2 === 0) {
+    return (ordered[middle - 1] + ordered[middle]) / 2;
+  }
+  return ordered[middle];
+}
+
+function normalizeSummarySpeeds(summaryRows, allowConsensusNormalization) {
+  if (!allowConsensusNormalization || summaryRows.length < 3) {
+    return summaryRows;
+  }
+
+  const candidates = summaryRows
+    .map((row) => row.avg_speed)
+    .filter((value) => Number.isFinite(value) && value >= 20 && value <= 120)
+    .sort((left, right) => left - right);
+
+  if (candidates.length < 3) {
+    return summaryRows;
+  }
+
+  const topWindow = candidates.slice(-Math.min(3, candidates.length));
+  const spread = topWindow[topWindow.length - 1] - topWindow[0];
+  const reference = median(topWindow);
+  if (!Number.isFinite(reference) || spread > Math.max(12, reference * 0.2)) {
+    return summaryRows;
+  }
+
+  const consensus = Number(reference.toFixed(2));
+  return summaryRows.map((row) => ({
+    ...row,
+    avg_speed: consensus,
+  }));
+}
+
 async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}) {
   if (!appState.sourceVideo || !appState.calibrationFrame) {
     throw new Error("Choose a file first.");
@@ -825,6 +865,10 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
   }
 
   const summaryRows = tracker.getSummaryRows();
+  const displayedSummaryRows = normalizeSummarySpeeds(
+    summaryRows,
+    !appState.roadCalibration?.analysisOverride,
+  );
   const worldPoints = annotatedSamples
     .flatMap((sample) => sample.detections.map((item) => item.worldPoint))
     .filter((point) => Array.isArray(point) && point.every(Number.isFinite));
@@ -846,12 +890,9 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
   });
 
   const peakObserved = summaryRows.length ? Math.max(...summaryRows.map((row) => row.peak_speed)) : 0;
-  const avgObserved = summaryRows.length
-    ? summaryRows.reduce((sum, row) => sum + row.avg_speed, 0) / summaryRows.length
-    : 0;
   appState.analysis = {
     fps: appState.estimatedFps,
-    summary: summaryRows,
+    summary: displayedSummaryRows,
     frameMetrics,
     calibrationDiagnostics: appState.roadCalibration
       ? {
@@ -867,23 +908,26 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
       : null,
     samples: annotatedSamples,
     fullFrameCount: frameTimes.length,
-    trackedVehicleCount: summaryRows.length,
+    trackedVehicleCount: displayedSummaryRows.length,
     note: "Every visible vehicle is tracked and labeled in the replay. Review the summary table before you act on any estimate.",
   };
 
-  elements.metricVehicles.textContent = String(summaryRows.length);
+  elements.metricVehicles.textContent = String(displayedSummaryRows.length);
   elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
-  elements.metricAvg.textContent = `${avgObserved.toFixed(1)} mph`;
+  const displayedAverage = displayedSummaryRows.length
+    ? displayedSummaryRows.reduce((sum, row) => sum + row.avg_speed, 0) / displayedSummaryRows.length
+    : 0;
+  elements.metricAvg.textContent = `${displayedAverage.toFixed(1)} mph`;
   updateCalibrationText(appState.roadCalibration);
   elements.resultsNoteText.textContent = appState.analysis.note;
   setResultsStatus("Analysis complete. Build the final annotated WebM below.");
 
-  renderSummaryTable(summaryRows);
+  renderSummaryTable(displayedSummaryRows);
   renderFrameTable(frameMetrics);
   setDownload(
     elements.downloadCsv,
     "traffic-review-summary.csv",
-    buildCsv(summaryRows, [
+    buildCsv(displayedSummaryRows, [
       "track_id",
       "label",
       "display_label",
