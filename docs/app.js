@@ -5,7 +5,7 @@ import { createYoloDetector } from "./lib/yolo.js";
 
 const ANALYSIS_DEFAULTS = {
   confidenceThreshold: 0.35,
-  historySeconds: 0.75,
+  historySeconds: 2,
   speedLimitMph: 35,
 };
 

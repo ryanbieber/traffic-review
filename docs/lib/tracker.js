@@ -56,6 +56,60 @@ function fitSlope(samples, valueAccessor) {
   return ((count * sumTimeValue) - (sumTime * sumValue)) / denominator;
 }
 
+function median(values) {
+  if (!values.length) {
+    return null;
+  }
+  const ordered = values.slice().sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  if (ordered.length % 2 === 0) {
+    return (ordered[middle - 1] + ordered[middle]) / 2;
+  }
+  return ordered[middle];
+}
+
+function chooseDominantWorldAxisIndex(worldPoints) {
+  if (worldPoints.length < 2) {
+    return null;
+  }
+  const first = worldPoints[0].worldPoint;
+  const last = worldPoints[worldPoints.length - 1].worldPoint;
+  const spanX = Math.abs(last[0] - first[0]);
+  const spanY = Math.abs(last[1] - first[1]);
+  if (!Number.isFinite(spanX) || !Number.isFinite(spanY)) {
+    return null;
+  }
+  return spanY >= spanX ? 1 : 0;
+}
+
+function estimateWorldAxisSpeed(worldPoints) {
+  const axisIndex = chooseDominantWorldAxisIndex(worldPoints);
+  if (axisIndex === null) {
+    return null;
+  }
+
+  const segmentSpeeds = [];
+  for (let index = 1; index < worldPoints.length; index += 1) {
+    const previous = worldPoints[index - 1];
+    const current = worldPoints[index];
+    const deltaTime = current.timeS - previous.timeS;
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      continue;
+    }
+    const delta = current.worldPoint[axisIndex] - previous.worldPoint[axisIndex];
+    if (!Number.isFinite(delta)) {
+      continue;
+    }
+    segmentSpeeds.push(Math.abs(delta) / deltaTime);
+  }
+
+  if (segmentSpeeds.length < 1) {
+    return null;
+  }
+
+  return median(segmentSpeeds);
+}
+
 function estimateSpeed(track, historySeconds, roadAxis = null) {
   if (track.history.length < 2) {
     return null;
@@ -66,11 +120,11 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
   const worldPoints = relevant.filter((entry) => Array.isArray(entry.worldPoint) && entry.worldPoint.every(Number.isFinite));
   const worldSpanS = worldPoints.length >= 2 ? worldPoints[worldPoints.length - 1].timeS - worldPoints[0].timeS : 0;
 
-  const worldSlope = worldPoints.length >= 2 && worldSpanS >= Math.min(0.2, historySeconds)
-    ? fitSlope(worldPoints, (entry) => entry.worldPoint[1])
+  const worldSpeed = worldPoints.length >= 2 && worldSpanS >= Math.min(0.2, historySeconds)
+    ? estimateWorldAxisSpeed(worldPoints)
     : null;
-  if (worldSlope !== null && Number.isFinite(worldSlope)) {
-    return Math.abs(worldSlope) * track.speedMultiplier;
+  if (worldSpeed !== null && Number.isFinite(worldSpeed)) {
+    return worldSpeed * track.speedMultiplier;
   }
 
   if (roadAxis) {
@@ -242,15 +296,42 @@ export class VehicleTracker {
   getSummaryRows() {
     return [...this.completedTracks, ...this.tracks.values()]
       .map((track) => ({
+        ...(() => {
+          const first = track.history[0] || null;
+          const last = track.history[track.history.length - 1] || null;
+          const elapsed = first && last ? last.timeS - first.timeS : null;
+          if (
+            first &&
+            last &&
+            elapsed !== null &&
+            Number.isFinite(elapsed) &&
+            elapsed > 0 &&
+            Array.isArray(first.worldPoint) &&
+            Array.isArray(last.worldPoint) &&
+            first.worldPoint.every(Number.isFinite) &&
+            last.worldPoint.every(Number.isFinite)
+          ) {
+            const axisIndex = Math.abs(last.worldPoint[1] - first.worldPoint[1]) >= Math.abs(last.worldPoint[0] - first.worldPoint[0])
+              ? 1
+              : 0;
+            const worldDistanceM = Math.abs(last.worldPoint[axisIndex] - first.worldPoint[axisIndex]);
+            if (Number.isFinite(worldDistanceM)) {
+              return {
+                avg_speed: Number(((worldDistanceM / elapsed) * track.speedMultiplier).toFixed(2)),
+              };
+            }
+          }
+          const fallbackAverage = track.speedSamples.length
+            ? track.speedSamples.reduce((sum, value) => sum + value, 0) / track.speedSamples.length
+            : 0;
+          return {
+            avg_speed: Number(fallbackAverage.toFixed(2)),
+          };
+        })(),
         track_id: track.id,
         label: track.label,
         display_label: track.displayLabel,
         peak_speed: Number(track.peakSpeed.toFixed(2)),
-        avg_speed: Number(
-          (track.speedSamples.length
-            ? track.speedSamples.reduce((sum, value) => sum + value, 0) / track.speedSamples.length
-            : 0).toFixed(2),
-        ),
         speed_unit: this.speedUnit,
         frames_seen: track.framesSeen,
         first_seen_s: Number(track.firstSeenS.toFixed(2)),

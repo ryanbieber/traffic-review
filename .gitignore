@@ -16,3 +16,5 @@ outputs/
 .pytest_cache/
 docs/.DS_Store
 node_modules/
+
+tests/fixtures/vs13/video.mp4
