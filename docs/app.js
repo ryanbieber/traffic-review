@@ -787,6 +787,7 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
     speedLimitMph: ANALYSIS_DEFAULTS.speedLimitMph,
     speedUnit: "mph",
     roadAxis: appState.roadCalibration?.axis || null,
+    preferWorldMotion: Boolean(appState.roadCalibration?.analysisOverride),
   });
 
   const video = appState.sourceVideo;

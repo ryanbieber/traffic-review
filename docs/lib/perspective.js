@@ -693,7 +693,7 @@ function summarizeCalibration(base) {
     const vpY = base.vanishingPoint.y / scaleY;
     const denominator = Math.max(24, referenceY - vpY);
     const numerator = Math.max(24, y - vpY);
-    return base.referenceScaleMPerPx * (numerator / denominator);
+    return base.referenceScaleMPerPx * (denominator / numerator);
   };
   const longitudinalMetersAtY = (y) => {
     if (!Number.isFinite(base.referenceScaleMPerPx) || base.referenceScaleMPerPx <= 0) {

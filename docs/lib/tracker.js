@@ -68,6 +68,33 @@ function median(values) {
   return ordered[middle];
 }
 
+function percentile(values, ratio) {
+  if (!values.length) {
+    return null;
+  }
+  const ordered = values.slice().sort((left, right) => left - right);
+  const clampedRatio = Math.max(0, Math.min(1, ratio));
+  const index = Math.min(ordered.length - 1, Math.floor(clampedRatio * ordered.length));
+  return ordered[index];
+}
+
+function maxRollingMedian(values, windowSize) {
+  if (values.length < windowSize || windowSize < 1) {
+    return null;
+  }
+  let best = null;
+  for (let index = 0; index <= values.length - windowSize; index += 1) {
+    const windowMedian = median(values.slice(index, index + windowSize));
+    if (windowMedian === null) {
+      continue;
+    }
+    if (best === null || windowMedian > best) {
+      best = windowMedian;
+    }
+  }
+  return best;
+}
+
 function chooseDominantWorldAxisIndex(worldPoints) {
   if (worldPoints.length < 2) {
     return null;
@@ -110,7 +137,49 @@ function estimateWorldAxisSpeed(worldPoints) {
   return median(segmentSpeeds);
 }
 
-function estimateSpeed(track, historySeconds, roadAxis = null) {
+function estimateRoadAxisSpeed(samples, roadAxis, speedMultiplier) {
+  if (!roadAxis || samples.length < 2) {
+    return null;
+  }
+  const axis = normalizeVector(roadAxis);
+  if (!axis) {
+    return null;
+  }
+
+  const segmentSpeeds = [];
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    const deltaTime = current.timeS - previous.timeS;
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      continue;
+    }
+    if (
+      !Array.isArray(previous.anchorPoint) ||
+      !Array.isArray(current.anchorPoint) ||
+      !Number.isFinite(previous.metersPerPixel) ||
+      !Number.isFinite(current.metersPerPixel)
+    ) {
+      continue;
+    }
+    const deltaX = current.anchorPoint[0] - previous.anchorPoint[0];
+    const deltaY = current.anchorPoint[1] - previous.anchorPoint[1];
+    const pixelDistance = Math.abs(deltaX * axis[0] + deltaY * axis[1]);
+    const averageScale = (current.metersPerPixel + previous.metersPerPixel) / 2;
+    const segmentSpeed = (pixelDistance * averageScale / deltaTime) * speedMultiplier;
+    if (Number.isFinite(segmentSpeed) && segmentSpeed >= 0) {
+      segmentSpeeds.push(segmentSpeed);
+    }
+  }
+
+  if (segmentSpeeds.length < 1) {
+    return null;
+  }
+
+  return maxRollingMedian(segmentSpeeds, 3) ?? percentile(segmentSpeeds, 0.9);
+}
+
+function estimateSpeed(track, historySeconds, roadAxis = null, preferWorldMotion = false) {
   if (track.history.length < 2) {
     return null;
   }
@@ -123,8 +192,13 @@ function estimateSpeed(track, historySeconds, roadAxis = null) {
   const worldSpeed = worldPoints.length >= 2 && worldSpanS >= Math.min(0.2, historySeconds)
     ? estimateWorldAxisSpeed(worldPoints)
     : null;
+  const roadSpeed = preferWorldMotion ? null : estimateRoadAxisSpeed(relevant, roadAxis, track.speedMultiplier);
   if (worldSpeed !== null && Number.isFinite(worldSpeed)) {
-    return worldSpeed * track.speedMultiplier;
+    const worldSpeedMph = Math.abs(worldSpeed) * track.speedMultiplier;
+    if (!preferWorldMotion && roadSpeed !== null && Number.isFinite(roadSpeed) && roadSpeed > worldSpeedMph * 1.35) {
+      return roadSpeed;
+    }
+    return worldSpeedMph;
   }
 
   if (roadAxis) {
@@ -208,6 +282,7 @@ export class VehicleTracker {
     maxIdleSeconds = 1.5,
     maxMatchDistance = 140,
     roadAxis = null,
+    preferWorldMotion = false,
   }) {
     this.historySeconds = historySeconds;
     this.speedLimitMph = speedLimitMph;
@@ -216,6 +291,7 @@ export class VehicleTracker {
     this.maxIdleSeconds = maxIdleSeconds;
     this.maxMatchDistance = maxMatchDistance;
     this.roadAxis = normalizeVector(roadAxis);
+    this.preferWorldMotion = Boolean(preferWorldMotion);
     this.nextTrackId = 1;
     this.tracks = new Map();
     this.completedTracks = [];
@@ -300,6 +376,7 @@ export class VehicleTracker {
           const first = track.history[0] || null;
           const last = track.history[track.history.length - 1] || null;
           const elapsed = first && last ? last.timeS - first.timeS : null;
+          let worldAverage = null;
           if (
             first &&
             last &&
@@ -316,16 +393,28 @@ export class VehicleTracker {
               : 0;
             const worldDistanceM = Math.abs(last.worldPoint[axisIndex] - first.worldPoint[axisIndex]);
             if (Number.isFinite(worldDistanceM)) {
-              return {
-                avg_speed: Number(((worldDistanceM / elapsed) * track.speedMultiplier).toFixed(2)),
-              };
+              worldAverage = Number(((worldDistanceM / elapsed) * track.speedMultiplier).toFixed(2));
             }
           }
+          const roadAxisSpeed = estimateRoadAxisSpeed(track.history, this.roadAxis, track.speedMultiplier);
           const fallbackAverage = track.speedSamples.length
             ? track.speedSamples.reduce((sum, value) => sum + value, 0) / track.speedSamples.length
             : 0;
+          const sampleAverage = Number(fallbackAverage.toFixed(2));
+          const baselineAverage = Number.isFinite(worldAverage) ? worldAverage : sampleAverage;
+          if (
+            !this.preferWorldMotion &&
+            roadAxisSpeed !== null &&
+            Number.isFinite(roadAxisSpeed) &&
+            roadAxisSpeed > baselineAverage * 1.35 &&
+            roadAxisSpeed > 8
+          ) {
+            return {
+              avg_speed: Number(roadAxisSpeed.toFixed(2)),
+            };
+          }
           return {
-            avg_speed: Number(fallbackAverage.toFixed(2)),
+            avg_speed: baselineAverage,
           };
         })(),
         track_id: track.id,
@@ -376,7 +465,7 @@ export class VehicleTracker {
     });
     track.history = track.history.filter((entry) => timeS - entry.timeS <= this.historySeconds * 2.5);
 
-    const speed = estimateSpeed(track, this.historySeconds, this.roadAxis);
+    const speed = estimateSpeed(track, this.historySeconds, this.roadAxis, this.preferWorldMotion);
     if (speed !== null && Number.isFinite(speed)) {
       track.currentSpeed = speed;
       track.speedSamples.push(speed);
