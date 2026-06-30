@@ -168,6 +168,8 @@ h1 {
   display: grid;
   gap: 8px;
   place-items: center;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
 .drop-zone span {

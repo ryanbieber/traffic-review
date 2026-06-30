@@ -1036,8 +1036,6 @@ async function loadSelectedFile(file) {
   if (appState.objectUrl) {
     URL.revokeObjectURL(appState.objectUrl);
   }
-  appState.analysis = null;
-  appState.analysisInProgress = false;
   appState.objectUrl = URL.createObjectURL(activeFile);
   elements.sourceVideo.playsInline = true;
   elements.sourceVideo.preload = "auto";
@@ -1046,6 +1044,8 @@ async function loadSelectedFile(file) {
   await waitForVideo(elements.sourceVideo);
   elements.sourceVideo.hidden = false;
 
+  appState.analysis = null;
+  appState.analysisInProgress = false;
   appState.sourceVideo = elements.sourceVideo;
   appState.estimatedFps = await estimateFps(elements.sourceVideo);
   elements.videoMeta.textContent =

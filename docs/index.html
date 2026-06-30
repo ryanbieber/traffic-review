@@ -30,18 +30,18 @@
           <div class="section-head">
             <div class="eyebrow">Step 1</div>
             <h2>Drop a video, then analyze it.</h2>
-            <p>Drag and drop a clip into the box or use the file picker. When the file is loaded, click Analyze underneath and the app will move to the analysis screen.</p>
+            <p>Tap the drop zone to choose a clip, or drag and drop one on desktop. When the file is loaded, click Analyze underneath and the app will move to the analysis screen.</p>
           </div>
 
           <div class="load-stack">
-            <div id="drop-zone" class="drop-zone">
-              <strong>Drop video here</strong>
-              <span>or use the file picker below</span>
-            </div>
+            <label id="drop-zone" class="drop-zone" for="video-file">
+              <strong>Tap to choose or drop video here</strong>
+              <span>your phone gallery or desktop file picker</span>
+            </label>
 
             <label class="file-field">
               <span>Choose a video file</span>
-              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
+              <input id="video-file" type="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp" required>
             </label>
 
             <button id="analyze-button" type="button" class="primary-btn" disabled>Analyze video</button>
