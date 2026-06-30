@@ -248,9 +248,12 @@ select {
   color: var(--text);
 }
 
-.file-field input {
-  padding: 10px;
-  background: transparent;
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .primary-btn,

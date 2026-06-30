@@ -151,7 +151,7 @@ async function main() {
     console.log("Waiting for heading");
     await page.waitForSelector("h1");
     const heading = await page.$eval("h1", (node) => node.textContent || "");
-    assert.match(heading, /Drop a clip/i);
+    assert.match(heading, /Is ATE ethical or just a money grab/i);
 
     console.log("Uploading clip");
     await prepareSmokeClip(page, clipPath);
