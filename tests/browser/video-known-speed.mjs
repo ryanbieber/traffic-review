@@ -8,8 +8,7 @@ import { startStaticServer, stopStaticServer } from "./static-server.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
-const clipPath = path.join(repoRoot, "tests/fixtures/vs13/CitroenC4Picasso_80.mp4");
-const expectedSpeedMph = 80 * 0.621371;
+const clipPath = path.join(repoRoot, "tests/fixtures/vs13/video.mp4");
 
 async function main() {
   const server = await startStaticServer(path.join(repoRoot, "docs"), 4173);
@@ -43,44 +42,39 @@ async function main() {
     await page.click("#analyze-button");
 
     await page.waitForFunction(() => {
-      const status = document.querySelector("#track-status-text");
-      return status && /scanning|calibration ready|analyzing|processed/i.test(status.textContent || "");
-    }, { timeout: 240000 });
-
-    await page.waitForFunction(() => {
       const status = document.querySelector("#results-status-text");
       return status && /analysis complete/i.test(status.textContent || "");
     }, { timeout: 240000 });
 
-    const actual = await page.evaluate((expectedSpeedMph) => {
+    const actual = await page.evaluate(() => {
       const summary = window.__trafficReview.analysis?.summary || [];
-      const primaryTrack = summary
+      const carRows = summary
+        .filter((row) => row.label === "car")
         .slice()
-        .sort((left, right) => {
-          const leftDelta = Math.abs(left.avg_speed - expectedSpeedMph);
-          const rightDelta = Math.abs(right.avg_speed - expectedSpeedMph);
-          return (leftDelta - rightDelta) || (right.frames_seen - left.frames_seen);
-        })[0] || null;
-      const calibration = window.__trafficReview.analysis?.calibrationDiagnostics || null;
+        .sort((left, right) => right.avg_speed - left.avg_speed);
+
       return {
         summaryCount: summary.length,
-        avgSpeed: primaryTrack?.avg_speed ?? null,
-        peakSpeed: primaryTrack?.peak_speed ?? null,
-        framesSeen: primaryTrack?.frames_seen ?? null,
-        calibration,
+        carRows: carRows.slice(0, 2).map((row) => ({
+          trackId: row.track_id,
+          avgSpeed: row.avg_speed,
+          peakSpeed: row.peak_speed,
+          label: row.display_label || row.label,
+        })),
+        calibration: window.__trafficReview.analysis?.calibrationDiagnostics || null,
       };
-    }, expectedSpeedMph);
+    });
 
-    assert.ok(actual.summaryCount >= 1, "the real clip was not tracked");
-    assert.ok(Number.isFinite(actual.avgSpeed), "missing average speed for the real clip");
-    assert.ok(Number.isFinite(actual.peakSpeed), "missing peak speed for the real clip");
-    assert.ok(actual.framesSeen > 0, "the real clip was not tracked");
-    assert.ok(Math.abs(actual.avgSpeed - expectedSpeedMph) <= 6, `expected about ${expectedSpeedMph.toFixed(2)} mph, got ${actual.avgSpeed.toFixed(2)} mph`);
+    assert.ok(actual.summaryCount >= 2, "the target clip did not produce enough tracked vehicles");
+    assert.ok(actual.carRows.length >= 2, "the target clip did not produce two car tracks");
+    assert.ok(Math.abs(actual.carRows[0].avgSpeed - 68) <= 2, `expected the faster car to be about 68 mph, got ${actual.carRows[0].avgSpeed.toFixed(2)} mph`);
+    assert.ok(Math.abs(actual.carRows[1].avgSpeed - 66) <= 2, `expected the second car to be about 66 mph, got ${actual.carRows[1].avgSpeed.toFixed(2)} mph`);
     assert.match(actual.calibration?.method || "", /lane/i);
+
     const progressWidth = await page.$eval("#progress-bar", (node) => node.style.width || "");
     assert.equal(progressWidth, "100%");
 
-    console.log("Real known-speed assertion passed");
+    console.log("Target clip speed assertion passed");
   } finally {
     if (browser) {
       await browser.close();

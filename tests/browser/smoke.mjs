@@ -151,14 +151,22 @@ async function main() {
     console.log("Waiting for heading");
     await page.waitForSelector("h1");
     const heading = await page.$eval("h1", (node) => node.textContent || "");
-    assert.match(heading, /See the vehicle/i);
+    assert.match(heading, /Drop a clip/i);
 
     console.log("Uploading clip");
     await prepareSmokeClip(page, clipPath);
 
     await page.waitForFunction(() => {
+      const button = document.querySelector("#analyze-button");
+      const decode = document.querySelector("#decode-text");
+      return button && !button.disabled && decode && /Ready to analyze/i.test(decode.textContent || "");
+    }, { timeout: 30000 });
+
+    await page.click("#analyze-button");
+
+    await page.waitForFunction(() => {
       const status = document.querySelector("#track-status-text");
-      return status && /scanning|analyzing|processed/i.test(status.textContent);
+      return status && /scanning|analyzing|processed/i.test(status.textContent || "");
     }, { timeout: 30000 });
 
     await page.waitForFunction(() => {
@@ -166,14 +174,11 @@ async function main() {
       return status && /analysis complete/i.test(status.textContent);
     }, { timeout: 180000 });
 
-    const activeStage = await page.$eval("#stage-results", (node) => node.classList.contains("active"));
-    assert.ok(activeStage);
-
-    await page.click("#build-video-button");
-
     await page.waitForFunction(() => {
+      const stage = document.querySelector("#stage-results");
       const video = document.querySelector("#annotated-video");
-      return video && video.src && video.src.length > 0;
+      const button = document.querySelector("#build-video-button");
+      return stage?.classList.contains("active") && video && !video.hidden && video.src && video.src.length > 0 && button && !button.disabled;
     }, { timeout: 180000 });
 
     const analysis = await page.evaluate(() => ({
@@ -182,8 +187,8 @@ async function main() {
     }));
     assert.ok(analysis.summaryLength > 0);
     assert.match(analysis.note, /Every visible vehicle/i);
-    const selectionText = await page.$eval("#selection-text", (node) => node.textContent || "");
-    assert.match(selectionText, /Calibration:/i);
+    const decodeText = await page.$eval("#decode-text", (node) => node.textContent || "");
+    assert.match(decodeText, /Ready to analyze/i);
     const rectifiedText = await page.$eval("#rectified-text", (node) => node.textContent || "");
     assert.match(rectifiedText, /(road plane|lane patch)/i);
     assert.doesNotMatch(rectifiedText, /unavailable/i);

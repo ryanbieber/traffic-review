@@ -25,13 +25,13 @@ const RECTIFIED_MAX_WIDTH = 420;
 const RECTIFIED_MAX_HEIGHT = 780;
 
 const elements = {
-  stageButtons: [...document.querySelectorAll("[data-stage-target]")],
   loadStage: document.querySelector("#stage-load"),
   trackStage: document.querySelector("#stage-track"),
   resultsStage: document.querySelector("#stage-results"),
   trackTitle: document.querySelector("#track-title"),
   trackSubtitle: document.querySelector("#track-subtitle"),
   trackBackButton: document.querySelector("#track-back-button"),
+  analyzeButton: document.querySelector("#analyze-button"),
   resultsBackButton: document.querySelector("#results-back-button"),
   buildVideoButton: document.querySelector("#build-video-button"),
   sourceVideo: document.querySelector("#source-video"),
@@ -55,7 +55,6 @@ const elements = {
   replayButton: document.querySelector("#replay-button"),
   videoMeta: document.querySelector("#video-meta"),
   decodeText: document.querySelector("#decode-text"),
-  selectionText: document.querySelector("#selection-text"),
   rectifiedText: document.querySelector("#rectified-text"),
   metricVehicles: document.querySelector("#metric-vehicles"),
   metricPeak: document.querySelector("#metric-peak"),
@@ -76,6 +75,7 @@ const appState = {
   decodeMode: "idle",
   stage: "load",
   cancelAnalysis: false,
+  analysisInProgress: false,
 };
 
 window.__trafficReview = appState;
@@ -98,6 +98,7 @@ function revokeAnnotatedVideo() {
     appState.annotatedVideoUrl = null;
   }
   elements.annotatedVideo.removeAttribute("src");
+  elements.annotatedVideo.hidden = true;
   elements.annotatedVideo.load();
   elements.annotatedVideoText.textContent = "Final annotated WebM will appear here.";
 }
@@ -386,30 +387,29 @@ function renderStage() {
   elements.trackStage.classList.toggle("active", isAnalyze);
   elements.resultsStage.classList.toggle("active", isResults);
 
-  elements.stageButtons.forEach((button) => {
-    const target = button.dataset.stageTarget;
-    button.classList.toggle("active", target === appState.stage);
-    button.disabled = true;
-  });
-
-  elements.trackTitle.textContent = isAnalyze ? "Analyzing vehicles" : "Upload and analyze";
+  elements.trackTitle.textContent = "Analyzing video";
   elements.trackSubtitle.textContent = isAnalyze
-    ? "The browser is labeling every detected vehicle with its current speed estimate."
-    : "Upload a clip and the browser will automatically calibrate, track, and label every visible vehicle.";
-  elements.trackBackButton.textContent = isAnalyze ? "Cancel analysis" : "Back to load";
-  elements.trackCalibrationText.style.display = isAnalyze ? "none" : "inline";
-  elements.resultsBackButton.textContent = "Back to load";
+    ? (appState.analysisInProgress
+      ? "The browser is labeling every detected vehicle with its current speed estimate."
+      : "The browser is finding vehicles, calibrating the road, and tracking them frame by frame."
+    )
+    : "The browser is finding vehicles, calibrating the road, and tracking them frame by frame.";
+  elements.trackBackButton.textContent = appState.analysisInProgress ? "Cancel analysis" : "Back to upload";
+  elements.resultsBackButton.textContent = "Back to upload";
   elements.resultsStage.hidden = !isResults;
   elements.loadStage.hidden = appState.stage !== "load";
   elements.trackStage.hidden = !isAnalyze;
   elements.resultsBackButton.disabled = !appState.sourceVideo;
   elements.buildVideoButton.disabled = !appState.analysis;
+  elements.analyzeButton.disabled = !appState.sourceVideo || appState.analysisInProgress;
 }
 
 function resetMetrics() {
+  const calibrationOverride = appState.roadCalibration?.analysisOverride ? appState.roadCalibration : null;
   elements.metricVehicles.textContent = "0";
   elements.metricPeak.textContent = "0.0 mph";
   elements.metricAvg.textContent = "0.0 mph";
+  elements.videoMeta.textContent = "No clip loaded";
   elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No results yet.</td></tr>';
   elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
   elements.resultsNoteText.textContent = "Not available yet.";
@@ -417,13 +417,27 @@ function resetMetrics() {
   elements.trackCalibrationText.textContent = "Not available yet.";
   elements.trackStatusText.textContent = "Load a clip to start.";
   elements.resultsStatusText.textContent = "Waiting for analysis.";
-  elements.selectionText.textContent = "Calibration: automatic";
   elements.rectifiedText.textContent = "Rectified view needs lane calibration from visible markings.";
   elements.decodeText.textContent = "Source: not loaded";
+  elements.analyzeButton.disabled = true;
+  elements.sourceVideo.hidden = true;
+  elements.sourceVideo.removeAttribute("src");
+  elements.sourceVideo.load();
+  appState.analysis = null;
+  appState.roadCalibration = null;
+  appState.calibrationFrame = null;
+  appState.calibrationSamples = [];
+  appState.analysisInProgress = false;
+  appState.sourceVideo = null;
+  appState.roadCalibration = calibrationOverride;
   revokeAnnotatedVideo();
   if (elements.rectifiedCanvas) {
     const context = elements.rectifiedCanvas.getContext("2d");
     context.clearRect(0, 0, elements.rectifiedCanvas.width, elements.rectifiedCanvas.height);
+  }
+  if (elements.previewCanvas) {
+    const context = elements.previewCanvas.getContext("2d");
+    context.clearRect(0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
   }
 }
 
@@ -452,10 +466,16 @@ function drawPreview(frameSource = null, annotations = null) {
   }
 
   context.font = "600 18px IBM Plex Mono";
+  const isCalibrationFrame = appState.calibrationFrame?.frameCanvas && frameSource === appState.calibrationFrame.frameCanvas;
   annotations.forEach((item) => {
     const color = trackColor(item.trackId);
     const speedText = Number.isFinite(item.currentSpeed) ? ` ${item.currentSpeed.toFixed(1)} mph` : "";
-    const text = `${item.displayLabel || (item.trackId ? `#${item.trackId} ${item.label}` : item.label)}${speedText}`;
+    const calibrationIndex = isCalibrationFrame && appState.calibrationFrame?.detections
+      ? appState.calibrationFrame.detections.indexOf(item)
+      : -1;
+    const text = isCalibrationFrame
+      ? `${item.label} ${calibrationIndex >= 0 ? calibrationIndex + 1 : ""}`.trim()
+      : `${item.displayLabel || (item.trackId ? `#${item.trackId} ${item.label}` : item.label)}${speedText}`;
     const textWidth = context.measureText(text).width;
 
     context.shadowColor = "transparent";
@@ -776,44 +796,20 @@ function pickCalibrationTarget(detections) {
     })[0] || null;
 }
 
-function median(values) {
-  if (!values.length) {
+function pickCalibrationFrame(samples) {
+  if (!samples.length) {
     return null;
   }
-  const ordered = values.slice().sort((left, right) => left - right);
-  const middle = Math.floor(ordered.length / 2);
-  if (ordered.length % 2 === 0) {
-    return (ordered[middle - 1] + ordered[middle]) / 2;
-  }
-  return ordered[middle];
-}
 
-function normalizeSummarySpeeds(summaryRows, allowConsensusNormalization) {
-  if (!allowConsensusNormalization || summaryRows.length < 3) {
-    return summaryRows;
-  }
-
-  const candidates = summaryRows
-    .map((row) => row.avg_speed)
-    .filter((value) => Number.isFinite(value) && value >= 20 && value <= 120)
-    .sort((left, right) => left - right);
-
-  if (candidates.length < 3) {
-    return summaryRows;
-  }
-
-  const topWindow = candidates.slice(-Math.min(3, candidates.length));
-  const spread = topWindow[topWindow.length - 1] - topWindow[0];
-  const reference = median(topWindow);
-  if (!Number.isFinite(reference) || spread > Math.max(12, reference * 0.2)) {
-    return summaryRows;
-  }
-
-  const consensus = Number(reference.toFixed(2));
-  return summaryRows.map((row) => ({
-    ...row,
-    avg_speed: consensus,
-  }));
+  return samples
+    .slice()
+    .sort((left, right) => {
+      const leftDetections = left.detections || [];
+      const rightDetections = right.detections || [];
+      const leftScore = leftDetections.reduce((sum, detection) => sum + (detection.score || 0), 0);
+      const rightScore = rightDetections.reduce((sum, detection) => sum + (detection.score || 0), 0);
+      return (rightDetections.length - leftDetections.length) || (rightScore - leftScore) || (left.timeS - right.timeS);
+    })[0] || null;
 }
 
 async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}) {
@@ -865,10 +861,7 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
   }
 
   const summaryRows = tracker.getSummaryRows();
-  const displayedSummaryRows = normalizeSummarySpeeds(
-    summaryRows,
-    !appState.roadCalibration?.analysisOverride,
-  );
+  const displayedSummaryRows = summaryRows;
   const worldPoints = annotatedSamples
     .flatMap((sample) => sample.detections.map((item) => item.worldPoint))
     .filter((point) => Array.isArray(point) && point.every(Number.isFinite));
@@ -920,7 +913,7 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
   elements.metricAvg.textContent = `${displayedAverage.toFixed(1)} mph`;
   updateCalibrationText(appState.roadCalibration);
   elements.resultsNoteText.textContent = appState.analysis.note;
-  setResultsStatus("Analysis complete. Build the final annotated WebM below.");
+  setResultsStatus("Analysis complete. Building the annotated WebM.");
 
   renderSummaryTable(displayedSummaryRows);
   renderFrameTable(frameMetrics);
@@ -949,8 +942,6 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
   );
   elements.replayButton.classList.remove("disabled");
   elements.exportVideo.classList.remove("disabled");
-  elements.buildVideoButton.disabled = false;
-  setStage("results", { force: true });
   setProgress(1);
 }
 
@@ -983,6 +974,7 @@ async function exportAnnotatedVideo() {
     return;
   }
   const canvas = elements.previewCanvas;
+  elements.buildVideoButton.disabled = true;
   const stream = canvas.captureStream(Math.max(1, appState.estimatedFps));
   const chunks = [];
   const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
@@ -1015,10 +1007,12 @@ async function exportAnnotatedVideo() {
   revokeAnnotatedVideo();
   appState.annotatedVideoUrl = URL.createObjectURL(blob);
   elements.annotatedVideo.src = appState.annotatedVideoUrl;
+  elements.annotatedVideo.hidden = false;
   elements.annotatedVideoText.textContent = "Final annotated WebM ready to play.";
   setDownload(elements.exportVideo, "traffic-review-annotated.webm", blob, "video/webm");
   elements.resultsStatusText.textContent = "Annotated WebM built. Play it above or download it.";
   setStatus("Annotated WebM export ready.");
+  elements.buildVideoButton.disabled = false;
 }
 
 async function loadSelectedFile(file) {
@@ -1043,12 +1037,14 @@ async function loadSelectedFile(file) {
     URL.revokeObjectURL(appState.objectUrl);
   }
   appState.analysis = null;
+  appState.analysisInProgress = false;
   appState.objectUrl = URL.createObjectURL(activeFile);
   elements.sourceVideo.playsInline = true;
   elements.sourceVideo.preload = "auto";
   elements.sourceVideo.muted = true;
   elements.sourceVideo.src = appState.objectUrl;
   await waitForVideo(elements.sourceVideo);
+  elements.sourceVideo.hidden = false;
 
   appState.sourceVideo = elements.sourceVideo;
   appState.estimatedFps = await estimateFps(elements.sourceVideo);
@@ -1060,46 +1056,20 @@ async function loadSelectedFile(file) {
       : "Source: decoded directly in the browser";
 }
 
-async function prepareAndAnalyze(file) {
-  clearDownloads();
-  resetMetrics();
-  setProgress(0);
-  setStatus("Loading video.");
-  await loadSelectedFile(file);
-  const detector = await ensureDetector();
-  appState.cancelAnalysis = false;
-  appState.stage = "analyze";
-  setStage("analyze", { force: true });
-  setStatus("Scanning the clip for visible vehicles.");
-  appState.calibrationSamples = await findSelectionFrame(appState.sourceVideo, detector, (fraction) => {
-    setProgress(fraction * 0.2);
-  });
-  appState.calibrationFrame = appState.calibrationSamples[0];
-  const calibrationTarget = pickCalibrationTarget(appState.calibrationFrame.detections);
-  const automaticCalibration = estimateRoadCalibration(
-    appState.calibrationSamples,
-    calibrationTarget ? { targetBox: calibrationTarget.box } : {},
-  );
-  const calibrationOverride = appState.roadCalibration?.analysisOverride ? appState.roadCalibration : null;
-  appState.roadCalibration = calibrationOverride || automaticCalibration;
-  if (!hasSpeedCalibration(appState.roadCalibration)) {
-    throw new Error("Lane markings were not clear enough for automatic speed estimates.");
-  }
-  elements.selectionText.textContent = "Calibration: automatic";
-  renderReviewFrame(appState.calibrationFrame.frameCanvas, appState.calibrationFrame.detections);
-  updateCalibrationText(appState.roadCalibration);
-  setProgress(0.2);
-  setStatus("Calibration ready. Analyzing every visible vehicle.");
-  setResultsStatus("Waiting for analysis.");
-  await analyzeAllVehicles({ progressOffset: 0.2, progressScale: 0.8 });
-}
-
 async function handleFile(file) {
   if (!file) {
     return;
   }
   try {
-    await prepareAndAnalyze(file);
+    clearDownloads();
+    resetMetrics();
+    setProgress(0);
+    setStatus("Loading video.");
+    await loadSelectedFile(file);
+    setStage("load", { force: true });
+    elements.analyzeButton.disabled = false;
+    elements.decodeText.textContent = `${elements.decodeText.textContent} • Ready to analyze`;
+    setStatus("Clip loaded. Click Analyze to start.");
   } catch (error) {
     setProgress(0);
     setStatus(error.message);
@@ -1108,17 +1078,85 @@ async function handleFile(file) {
   }
 }
 
+async function startAnalysis() {
+  if (!appState.sourceVideo || appState.analysisInProgress) {
+    return;
+  }
+  try {
+    const calibrationOverride = appState.roadCalibration?.analysisOverride ? appState.roadCalibration : null;
+    clearDownloads();
+    appState.analysis = null;
+    appState.roadCalibration = calibrationOverride;
+    appState.calibrationFrame = null;
+    appState.calibrationSamples = [];
+    revokeAnnotatedVideo();
+    elements.metricVehicles.textContent = "0";
+    elements.metricPeak.textContent = "0.0 mph";
+    elements.metricAvg.textContent = "0.0 mph";
+    elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No results yet.</td></tr>';
+    elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
+    elements.resultsNoteText.textContent = "Not available yet.";
+    elements.resultsCalibrationText.textContent = "Not available yet.";
+    elements.trackCalibrationText.textContent = "Not available yet.";
+    elements.resultsStatusText.textContent = "Waiting for analysis.";
+    elements.trackStatusText.textContent = "Scanning the clip for visible vehicles.";
+    elements.rectifiedText.textContent = "Rectified view needs lane calibration from visible markings.";
+    setProgress(0);
+    appState.analysisInProgress = true;
+    setStage("analyze", { force: true });
+    setStatus("Scanning the clip for visible vehicles.");
+    setResultsStatus("Waiting for analysis.");
+    const detector = await ensureDetector();
+    appState.cancelAnalysis = false;
+    appState.calibrationSamples = await findSelectionFrame(appState.sourceVideo, detector, (fraction) => {
+      setProgress(fraction * 0.2);
+    });
+    appState.calibrationFrame = pickCalibrationFrame(appState.calibrationSamples) || appState.calibrationSamples[0];
+    appState.roadCalibration = calibrationOverride || estimateRoadCalibration(
+      appState.calibrationSamples,
+      pickCalibrationTarget(appState.calibrationFrame.detections)
+        ? { targetBox: pickCalibrationTarget(appState.calibrationFrame.detections).box }
+        : {},
+    );
+    if (!hasSpeedCalibration(appState.roadCalibration)) {
+      throw new Error("Lane markings were not clear enough for automatic speed estimates.");
+    }
+    renderReviewFrame(appState.calibrationFrame.frameCanvas, appState.calibrationFrame.detections);
+    updateCalibrationText(appState.roadCalibration);
+    setProgress(0.2);
+    setStatus("Calibration ready. Analyzing every visible vehicle.");
+    setResultsStatus("Waiting for analysis.");
+    await analyzeAllVehicles({ progressOffset: 0.2, progressScale: 0.8 });
+    await exportAnnotatedVideo();
+    setStage("results", { force: true });
+  } catch (error) {
+    if (error.message !== "Analysis canceled.") {
+      setProgress(0.2);
+      setStatus(error.message);
+      elements.resultsNoteText.textContent = "Failed while loading the clip, finding vehicles, or running analysis.";
+    }
+    setStage("load", { force: true });
+  } finally {
+    appState.analysisInProgress = false;
+    renderStage();
+  }
+}
+
 elements.fileInput.addEventListener("change", async (event) => {
   await handleFile(event.target.files?.[0]);
 });
 
 elements.trackBackButton.addEventListener("click", () => {
-  if (appState.stage === "analyze") {
+  if (appState.stage === "analyze" && appState.analysisInProgress) {
     appState.cancelAnalysis = true;
     setStage("load", { force: true });
     return;
   }
   setStage("load", { force: true });
+});
+
+elements.analyzeButton.addEventListener("click", async () => {
+  await startAnalysis();
 });
 
 elements.resultsBackButton.addEventListener("click", () => {

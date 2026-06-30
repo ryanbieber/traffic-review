@@ -427,6 +427,14 @@ async function runCase(page, speedMph, toleranceMph) {
   await uploadKnownSpeedClip(page, worldToImage, speedMph);
 
   await page.waitForFunction(() => {
+    const button = document.querySelector("#analyze-button");
+    const decode = document.querySelector("#decode-text");
+    return button && !button.disabled && decode && /Ready to analyze/i.test(decode.textContent || "");
+  }, { timeout: 30000 });
+
+  await page.click("#analyze-button");
+
+  await page.waitForFunction(() => {
     const status = document.querySelector("#track-status-text");
     return status && /scanning|calibration ready|analyzing|processed/i.test(status.textContent || "");
   }, { timeout: 180000 });

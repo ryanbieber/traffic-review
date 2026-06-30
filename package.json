@@ -7,7 +7,8 @@
     "test:browser": "node tests/browser/smoke.mjs",
     "test:browser:known-speed": "node tests/browser/known-speed.mjs",
     "test:browser:known-speed-real": "node tests/browser/real-known-speed.mjs",
-    "test": "npm run test:unit && npm run test:browser && npm run test:browser:known-speed && npm run test:browser:known-speed-real"
+    "test:browser:target-speed": "node tests/browser/video-known-speed.mjs",
+    "test": "npm run test:unit && npm run test:browser && npm run test:browser:known-speed && npm run test:browser:known-speed-real && npm run test:browser:target-speed"
   },
   "devDependencies": {
     "puppeteer-core": "^24.12.1"

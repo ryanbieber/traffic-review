@@ -15,64 +15,54 @@
       <header class="hero">
         <div class="hero-copy">
           <div class="eyebrow">Traffic-camera review</div>
-          <h1>See the vehicle, then judge the speed.</h1>
-          <p class="lead">Drag in a traffic video or pick a file. The browser automatically calibrates, tracks every visible vehicle, and estimates speed.</p>
+          <h1>Drop a clip, click analyze, get speeds.</h1>
+          <p class="lead">Drag a video into the drop zone, then click Analyze. The browser handles calibration, tracking, and the final annotated WebM automatically.</p>
           <div class="hero-points">
-            <span>Browser YOLO</span>
-            <span>CSV + JSON + WebM</span>
+            <span>1 Drop</span>
+            <span>2 Analyze</span>
+            <span>3 Review</span>
           </div>
         </div>
       </header>
 
-      <nav class="stage-rail" aria-label="Workflow stages">
-        <button type="button" class="stage-chip active" data-stage-target="load">1 Load</button>
-        <button type="button" class="stage-chip" data-stage-target="analyze">2 Analyze</button>
-        <button type="button" class="stage-chip" data-stage-target="results">3 Results</button>
-      </nav>
-
       <main class="workflow">
         <section id="stage-load" class="card stage-pane">
           <div class="section-head">
-            <h2>Upload</h2>
-            <p>Drop a video onto the target below or use the file picker. Analysis starts automatically after upload.</p>
+            <div class="eyebrow">Step 1</div>
+            <h2>Drop a video, then analyze it.</h2>
+            <p>Drag and drop a clip into the box or use the file picker. When the file is loaded, click Analyze underneath and the app will move to the analysis screen.</p>
           </div>
 
-          <form id="analysis-form" class="stage-grid">
-            <div class="stage-column">
-              <div id="drop-zone" class="drop-zone">
-                <strong>Drop video here</strong>
-                <span>or use the file picker below</span>
-              </div>
-
-              <label class="file-field">
-                <span>Choose a video file</span>
-                <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
-              </label>
+          <div class="load-stack">
+            <div id="drop-zone" class="drop-zone">
+              <strong>Drop video here</strong>
+              <span>or use the file picker below</span>
             </div>
 
-            <div class="stage-column stage-preview-column">
-              <div class="section-head compact">
-                <h3>Loaded clip</h3>
-                <p>Confirm the source before moving on.</p>
-              </div>
+            <label class="file-field">
+              <span>Choose a video file</span>
+              <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.webm" required>
+            </label>
 
-              <video id="source-video" class="source-video" controls muted playsinline></video>
-              <div class="preview-meta">
-                <span id="video-meta">No clip loaded</span>
-                <span id="decode-text">Source: not loaded</span>
-              </div>
+            <button id="analyze-button" type="button" class="primary-btn" disabled>Analyze video</button>
+
+            <video id="source-video" class="source-video" controls muted playsinline hidden></video>
+            <div class="preview-meta load-meta">
+              <span id="video-meta">No clip loaded</span>
+              <span id="decode-text">Source: not loaded</span>
             </div>
-          </form>
+          </div>
         </section>
 
         <section id="stage-track" class="card stage-pane">
           <div class="section-head">
-            <h2 id="track-title">Upload and analyze</h2>
-            <p id="track-subtitle">The browser will calibrate and process the clip automatically, then label every visible vehicle with its estimated speed.</p>
+            <div class="eyebrow">Step 2</div>
+            <h2 id="track-title">Analyzing video</h2>
+            <p id="track-subtitle">The browser is finding vehicles, calibrating the road, and tracking them frame by frame.</p>
           </div>
 
           <div class="stage-actions">
-            <button id="track-back-button" type="button" class="ghost-btn">Back to load</button>
+            <button id="track-back-button" type="button" class="ghost-btn">Back to upload</button>
           </div>
 
           <div class="stage-grid analysis-grid">
@@ -82,7 +72,6 @@
               </div>
 
               <div class="preview-meta">
-                <span id="selection-text">Calibration: automatic</span>
                 <span id="track-calibration-text">Not available yet.</span>
                 <span id="track-status-text">Load a clip to start.</span>
               </div>
@@ -111,6 +100,7 @@
 
         <section id="stage-results" class="card stage-pane">
           <div class="section-head">
+            <div class="eyebrow">Step 3</div>
             <h2>Results</h2>
             <p id="results-status-text">Waiting for analysis.</p>
           </div>
@@ -127,12 +117,12 @@
           </div>
 
           <div class="stage-actions">
-            <button id="results-back-button" type="button" class="ghost-btn">Back to load</button>
-            <button id="build-video-button" type="button" class="primary-btn">Build annotated WebM</button>
+            <button id="results-back-button" type="button" class="ghost-btn">Back to upload</button>
+            <button id="build-video-button" type="button" class="primary-btn">Rebuild annotated WebM</button>
           </div>
 
           <div class="results-media">
-            <video id="annotated-video" class="source-video" controls playsinline></video>
+            <video id="annotated-video" class="source-video" controls playsinline hidden></video>
             <div class="preview-meta">
               <span id="annotated-video-text">Final annotated WebM will appear here.</span>
             </div>
@@ -182,29 +172,30 @@
             </table>
           </div>
 
-          <div class="section-head compact">
-            <h3>Per-Frame Metrics</h3>
-            <p>Each row represents a sampled frame in the browser analysis loop.</p>
-          </div>
-
-          <div class="table-wrap">
-            <table id="frame-results-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Vehicles</th>
-                  <th>Avg Speed</th>
-                  <th>Max Speed</th>
-                  <th>Tracks</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colspan="5">No frame metrics yet.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <details class="advanced-panel">
+            <summary>Frame-by-frame metrics</summary>
+            <div class="advanced-panel-body">
+              <p>Each row represents a sampled frame in the browser analysis loop.</p>
+              <div class="table-wrap">
+                <table id="frame-results-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Vehicles</th>
+                      <th>Avg Speed</th>
+                      <th>Max Speed</th>
+                      <th>Tracks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td colspan="5">No frame metrics yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
         </section>
       </main>
     </div>

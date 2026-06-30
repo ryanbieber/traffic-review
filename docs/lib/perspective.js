@@ -5,6 +5,9 @@ const DEFAULT_DASH_LENGTH_M = 3.048;
 const DEFAULT_DASH_GAP_M = 9.144;
 const DEFAULT_DASH_CYCLE_M = DEFAULT_DASH_LENGTH_M + DEFAULT_DASH_GAP_M;
 const ANALYSIS_ROWS = [0.55, 0.62, 0.69, 0.76, 0.83, 0.9];
+// Keep the road reference a little below the vanishing point so the lane scale
+// stays stable on short, near-camera clips.
+const ROAD_REFERENCE_PADDING_PX = 27;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -872,7 +875,7 @@ export function estimateRoadCalibration(samples, options = {}) {
     : null;
   const referenceY = clamp(
     options.referenceY || targetReferenceY || bestFrame.frame.height * 0.78,
-    vanishingPoint.y + 28,
+    vanishingPoint.y + ROAD_REFERENCE_PADDING_PX,
     bestFrame.frame.height - 20,
   );
 
