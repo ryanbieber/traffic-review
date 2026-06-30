@@ -95,6 +95,47 @@ function maxRollingMedian(values, windowSize) {
   return best;
 }
 
+const MIN_REPORTABLE_SPEED_SAMPLES = 3;
+const MIN_REPORTABLE_TRACK_SECONDS = 0.35;
+const MAX_REASONABLE_SPEED_MPH = 140;
+const SPEED_SMOOTHING_ALPHA = 0.35;
+
+function isReasonableSpeed(speedMph) {
+  return Number.isFinite(speedMph) && speedMph >= 0 && speedMph <= MAX_REASONABLE_SPEED_MPH;
+}
+
+function mean(values) {
+  if (!values.length) {
+    return null;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function roundedSpeed(value) {
+  return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
+}
+
+function getTrackDuration(track) {
+  const first = track.history[0] || null;
+  const last = track.history[track.history.length - 1] || null;
+  if (!first || !last) {
+    return 0;
+  }
+  const elapsed = last.timeS - first.timeS;
+  return Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
+}
+
+function hasReportableSpeed(track) {
+  return track.smoothedSpeedSamples.length >= MIN_REPORTABLE_SPEED_SAMPLES &&
+    getTrackDuration(track) >= MIN_REPORTABLE_TRACK_SECONDS;
+}
+
+function representativeSmoothedSpeed(track) {
+  return maxRollingMedian(track.smoothedSpeedSamples, 5) ??
+    percentile(track.smoothedSpeedSamples, 0.75) ??
+    mean(track.smoothedSpeedSamples);
+}
+
 function chooseDominantWorldAxisIndex(worldPoints) {
   if (worldPoints.length < 2) {
     return null;
@@ -135,6 +176,40 @@ function estimateWorldAxisSpeed(worldPoints) {
   }
 
   return median(segmentSpeeds);
+}
+
+function estimateWindowedWorldAxisSpeed(worldPoints, speedMultiplier) {
+  const axisIndex = chooseDominantWorldAxisIndex(worldPoints);
+  if (axisIndex === null) {
+    return null;
+  }
+
+  const windowSpeeds = [];
+  for (let endIndex = 1; endIndex < worldPoints.length; endIndex += 1) {
+    for (let startIndex = 0; startIndex < endIndex; startIndex += 1) {
+      const start = worldPoints[startIndex];
+      const end = worldPoints[endIndex];
+      const elapsed = end.timeS - start.timeS;
+      if (!Number.isFinite(elapsed) || elapsed < 1.2) {
+        continue;
+      }
+      const distanceM = Math.abs(end.worldPoint[axisIndex] - start.worldPoint[axisIndex]);
+      const speedMph = (distanceM / elapsed) * speedMultiplier;
+      if (isReasonableSpeed(speedMph)) {
+        windowSpeeds.push({ elapsed, speedMph });
+      }
+    }
+  }
+
+  if (!windowSpeeds.length) {
+    return null;
+  }
+
+  const maxElapsed = Math.max(...windowSpeeds.map((sample) => sample.elapsed));
+  const longWindowSpeeds = windowSpeeds
+    .filter((sample) => sample.elapsed >= maxElapsed * 0.8)
+    .map((sample) => sample.speedMph);
+  return median(longWindowSpeeds);
 }
 
 function estimateRoadAxisSpeed(samples, roadAxis, speedMultiplier) {
@@ -358,13 +433,15 @@ export class VehicleTracker {
 
     return detections.map((detection) => {
       const track = this.tracks.get(detection.trackId);
+      const reportableSpeed = hasReportableSpeed(track);
       return {
         ...detection,
         displayLabel: track.displayLabel,
-        currentSpeed: track.currentSpeed,
-        peakSpeed: track.peakSpeed,
+        currentSpeed: reportableSpeed ? track.currentSpeed : null,
+        peakSpeed: reportableSpeed ? track.peakSpeed : null,
         speedUnit: this.speedUnit,
-        flagged: track.peakSpeed >= this.speedLimitMph,
+        speedStatus: reportableSpeed ? "estimated" : "not_enough_info",
+        flagged: reportableSpeed && track.peakSpeed >= this.speedLimitMph,
       };
     });
   }
@@ -373,61 +450,61 @@ export class VehicleTracker {
     return [...this.completedTracks, ...this.tracks.values()]
       .map((track) => ({
         ...(() => {
-          const first = track.history[0] || null;
-          const last = track.history[track.history.length - 1] || null;
-          const elapsed = first && last ? last.timeS - first.timeS : null;
-          let worldAverage = null;
-          if (
-            first &&
-            last &&
-            elapsed !== null &&
-            Number.isFinite(elapsed) &&
-            elapsed > 0 &&
-            Array.isArray(first.worldPoint) &&
-            Array.isArray(last.worldPoint) &&
-            first.worldPoint.every(Number.isFinite) &&
-            last.worldPoint.every(Number.isFinite)
-          ) {
-            const axisIndex = Math.abs(last.worldPoint[1] - first.worldPoint[1]) >= Math.abs(last.worldPoint[0] - first.worldPoint[0])
-              ? 1
-              : 0;
-            const worldDistanceM = Math.abs(last.worldPoint[axisIndex] - first.worldPoint[axisIndex]);
-            if (Number.isFinite(worldDistanceM)) {
-              worldAverage = Number(((worldDistanceM / elapsed) * track.speedMultiplier).toFixed(2));
-            }
+          const reportableSpeed = hasReportableSpeed(track);
+          if (!reportableSpeed) {
+            return {
+              avg_speed: null,
+              peak_speed: null,
+              speed_status: "not_enough_info",
+            };
           }
           const roadAxisSpeed = estimateRoadAxisSpeed(track.history, this.roadAxis, track.speedMultiplier);
-          const fallbackAverage = track.speedSamples.length
-            ? track.speedSamples.reduce((sum, value) => sum + value, 0) / track.speedSamples.length
-            : 0;
-          const sampleAverage = Number(fallbackAverage.toFixed(2));
-          const baselineAverage = Number.isFinite(worldAverage) ? worldAverage : sampleAverage;
+          const worldPoints = track.history.filter((entry) => Array.isArray(entry.worldPoint) && entry.worldPoint.every(Number.isFinite));
+          const windowedWorldSpeed = estimateWindowedWorldAxisSpeed(worldPoints, track.speedMultiplier);
+          const sampleAverage = roundedSpeed(representativeSmoothedSpeed(track));
+          if (
+            windowedWorldSpeed !== null &&
+            Number.isFinite(windowedWorldSpeed) &&
+            isReasonableSpeed(windowedWorldSpeed) &&
+            windowedWorldSpeed > sampleAverage * 1.35 &&
+            windowedWorldSpeed > 8
+          ) {
+            return {
+              avg_speed: roundedSpeed(windowedWorldSpeed),
+              peak_speed: roundedSpeed(Math.max(track.peakSpeed, windowedWorldSpeed)),
+              speed_status: "estimated",
+            };
+          }
           if (
             !this.preferWorldMotion &&
             roadAxisSpeed !== null &&
             Number.isFinite(roadAxisSpeed) &&
-            roadAxisSpeed > baselineAverage * 1.35 &&
+            isReasonableSpeed(roadAxisSpeed) &&
+            roadAxisSpeed > sampleAverage * 1.35 &&
             roadAxisSpeed > 8
           ) {
             return {
-              avg_speed: Number(roadAxisSpeed.toFixed(2)),
+              avg_speed: roundedSpeed(roadAxisSpeed),
+              peak_speed: roundedSpeed(Math.max(track.peakSpeed, roadAxisSpeed)),
+              speed_status: "estimated",
             };
           }
           return {
-            avg_speed: baselineAverage,
+            avg_speed: sampleAverage,
+            peak_speed: roundedSpeed(track.peakSpeed),
+            speed_status: "estimated",
           };
         })(),
         track_id: track.id,
         label: track.label,
         display_label: track.displayLabel,
-        peak_speed: Number(track.peakSpeed.toFixed(2)),
         speed_unit: this.speedUnit,
         frames_seen: track.framesSeen,
         first_seen_s: Number(track.firstSeenS.toFixed(2)),
         last_seen_s: Number(track.lastSeenS.toFixed(2)),
-        flagged: track.peakSpeed >= this.speedLimitMph,
+        flagged: hasReportableSpeed(track) && track.peakSpeed >= this.speedLimitMph,
       }))
-      .sort((left, right) => right.peak_speed - left.peak_speed);
+      .sort((left, right) => (right.peak_speed ?? -1) - (left.peak_speed ?? -1));
   }
 
   #createTrack(detection, timeS, measureDetection) {
@@ -440,6 +517,7 @@ export class VehicleTracker {
       currentSpeed: 0,
       peakSpeed: 0,
       speedSamples: [],
+      smoothedSpeedSamples: [],
       history: [],
       firstSeenS: timeS,
       lastSeenS: timeS,
@@ -466,10 +544,15 @@ export class VehicleTracker {
     track.history = track.history.filter((entry) => timeS - entry.timeS <= this.historySeconds * 2.5);
 
     const speed = estimateSpeed(track, this.historySeconds, this.roadAxis, this.preferWorldMotion);
-    if (speed !== null && Number.isFinite(speed)) {
-      track.currentSpeed = speed;
+    if (isReasonableSpeed(speed)) {
       track.speedSamples.push(speed);
-      track.peakSpeed = Math.max(track.peakSpeed, speed);
+      const previousSmoothed = track.smoothedSpeedSamples[track.smoothedSpeedSamples.length - 1];
+      const smoothedSpeed = Number.isFinite(previousSmoothed)
+        ? (previousSmoothed * (1 - SPEED_SMOOTHING_ALPHA)) + (speed * SPEED_SMOOTHING_ALPHA)
+        : speed;
+      track.smoothedSpeedSamples.push(smoothedSpeed);
+      track.currentSpeed = smoothedSpeed;
+      track.peakSpeed = Math.max(track.peakSpeed, smoothedSpeed);
     }
 
     detection.trackId = track.id;

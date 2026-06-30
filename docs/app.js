@@ -546,6 +546,10 @@ function buildCsv(rows, headers) {
   return lines.join("\n");
 }
 
+function formatSpeed(value, unit) {
+  return Number.isFinite(value) ? `${value.toFixed(1)} ${unit}` : "Not enough info";
+}
+
 function renderSummaryTable(rows) {
   if (!rows.length) {
     elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No vehicles were tracked.</td></tr>';
@@ -558,8 +562,8 @@ function renderSummaryTable(rows) {
         <tr class="${row.flagged ? "flagged" : ""}">
           <td>${row.track_id}</td>
           <td>${row.display_label || row.label}</td>
-          <td>${row.peak_speed.toFixed(1)} ${row.speed_unit}</td>
-          <td>${row.avg_speed.toFixed(1)} ${row.speed_unit}</td>
+          <td>${formatSpeed(row.peak_speed, row.speed_unit)}</td>
+          <td>${formatSpeed(row.avg_speed, row.speed_unit)}</td>
           <td>${row.frames_seen}</td>
           <td>${row.first_seen_s.toFixed(2)}s</td>
           <td>${row.last_seen_s.toFixed(2)}s</td>
@@ -882,7 +886,8 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
     };
   });
 
-  const peakObserved = summaryRows.length ? Math.max(...summaryRows.map((row) => row.peak_speed)) : 0;
+  const reportableSummaryRows = summaryRows.filter((row) => Number.isFinite(row.avg_speed) && Number.isFinite(row.peak_speed));
+  const peakObserved = reportableSummaryRows.length ? Math.max(...reportableSummaryRows.map((row) => row.peak_speed)) : null;
   appState.analysis = {
     fps: appState.estimatedFps,
     summary: displayedSummaryRows,
@@ -906,11 +911,11 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
   };
 
   elements.metricVehicles.textContent = String(displayedSummaryRows.length);
-  elements.metricPeak.textContent = `${peakObserved.toFixed(1)} mph`;
-  const displayedAverage = displayedSummaryRows.length
-    ? displayedSummaryRows.reduce((sum, row) => sum + row.avg_speed, 0) / displayedSummaryRows.length
-    : 0;
-  elements.metricAvg.textContent = `${displayedAverage.toFixed(1)} mph`;
+  elements.metricPeak.textContent = formatSpeed(peakObserved, "mph");
+  const displayedAverage = reportableSummaryRows.length
+    ? reportableSummaryRows.reduce((sum, row) => sum + row.avg_speed, 0) / reportableSummaryRows.length
+    : null;
+  elements.metricAvg.textContent = formatSpeed(displayedAverage, "mph");
   updateCalibrationText(appState.roadCalibration);
   elements.resultsNoteText.textContent = appState.analysis.note;
   setResultsStatus("Analysis complete. Building the annotated WebM.");
@@ -926,6 +931,7 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
       "display_label",
       "peak_speed",
       "avg_speed",
+      "speed_status",
       "speed_unit",
       "frames_seen",
       "first_seen_s",
