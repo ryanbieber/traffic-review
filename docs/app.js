@@ -410,7 +410,7 @@ function resetMetrics() {
   elements.metricPeak.textContent = "0.0 mph";
   elements.metricAvg.textContent = "0.0 mph";
   elements.videoMeta.textContent = "No clip loaded";
-  elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No results yet.</td></tr>';
+  elements.summaryTableBody.innerHTML = '<tr><td colspan="10">No results yet.</td></tr>';
   elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
   elements.resultsNoteText.textContent = "Not available yet.";
   elements.resultsCalibrationText.textContent = "Not available yet.";
@@ -550,9 +550,13 @@ function formatSpeed(value, unit) {
   return Number.isFinite(value) ? `${value.toFixed(1)} ${unit}` : "Not enough info";
 }
 
+function formatSpeedStatus(status) {
+  return status === "estimated" ? "Estimated" : "Not enough info";
+}
+
 function renderSummaryTable(rows) {
   if (!rows.length) {
-    elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No vehicles were tracked.</td></tr>';
+    elements.summaryTableBody.innerHTML = '<tr><td colspan="10">No vehicles were tracked.</td></tr>';
     return;
   }
 
@@ -567,6 +571,8 @@ function renderSummaryTable(rows) {
           <td>${row.frames_seen}</td>
           <td>${row.first_seen_s.toFixed(2)}s</td>
           <td>${row.last_seen_s.toFixed(2)}s</td>
+          <td>${formatSpeedStatus(row.speed_status)}</td>
+          <td>${row.trust_reason || ""}</td>
           <td>${row.flagged ? "Yes" : "No"}</td>
         </tr>
       `,
@@ -932,6 +938,10 @@ async function analyzeAllVehicles({ progressOffset = 0, progressScale = 1 } = {}
       "peak_speed",
       "avg_speed",
       "speed_status",
+      "trust_reason",
+      "track_duration_s",
+      "speed_sample_count",
+      "rejected_speed_sample_count",
       "speed_unit",
       "frames_seen",
       "first_seen_s",
@@ -1106,7 +1116,7 @@ async function startAnalysis() {
     elements.metricVehicles.textContent = "0";
     elements.metricPeak.textContent = "0.0 mph";
     elements.metricAvg.textContent = "0.0 mph";
-    elements.summaryTableBody.innerHTML = '<tr><td colspan="8">No results yet.</td></tr>';
+    elements.summaryTableBody.innerHTML = '<tr><td colspan="10">No results yet.</td></tr>';
     elements.frameTableBody.innerHTML = '<tr><td colspan="5">No frame metrics yet.</td></tr>';
     elements.resultsNoteText.textContent = "Not available yet.";
     elements.resultsCalibrationText.textContent = "Not available yet.";
