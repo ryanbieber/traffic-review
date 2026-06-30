@@ -1065,15 +1065,22 @@ async function handleFile(file) {
     resetMetrics();
     setProgress(0);
     setStatus("Loading video.");
+    elements.analyzeButton.textContent = "Loading...";
+    elements.videoMeta.textContent = file.name || "Loading clip...";
+    elements.decodeText.textContent = file.type.includes("webm")
+      ? "Loading video in the browser."
+      : "Converting to WebM for browser playback.";
     await loadSelectedFile(file);
     setStage("load", { force: true });
     elements.analyzeButton.disabled = false;
+    elements.analyzeButton.textContent = "Analyze video";
     elements.decodeText.textContent = `${elements.decodeText.textContent} • Ready to analyze`;
     setStatus("Clip loaded. Click Analyze to start.");
   } catch (error) {
     setProgress(0);
     setStatus(error.message);
     elements.resultsNoteText.textContent = "Failed while loading the clip, finding vehicles, or running analysis.";
+    elements.analyzeButton.textContent = "Analyze video";
     setStage("load", { force: true });
   }
 }
