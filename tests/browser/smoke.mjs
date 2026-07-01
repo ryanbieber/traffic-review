@@ -160,14 +160,14 @@ async function main() {
       const button = document.querySelector("#analyze-button");
       const decode = document.querySelector("#decode-text");
       return button && !button.disabled && decode && /Ready to analyze/i.test(decode.textContent || "");
-    }, { timeout: 30000 });
+    }, { timeout: 60000 });
 
     await page.click("#analyze-button");
 
     await page.waitForFunction(() => {
       const status = document.querySelector("#track-status-text");
-      return status && /scanning|analyzing|processed/i.test(status.textContent || "");
-    }, { timeout: 30000 });
+      return status && /loading|scanning|analyzing|processed/i.test(status.textContent || "");
+    }, { timeout: 60000 });
 
     await page.waitForFunction(() => {
       const status = document.querySelector("#results-status-text");

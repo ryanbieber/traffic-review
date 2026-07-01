@@ -1056,9 +1056,9 @@ async function loadSelectedFile(file) {
   elements.sourceVideo.playsInline = true;
   elements.sourceVideo.preload = "auto";
   elements.sourceVideo.muted = true;
+  elements.sourceVideo.hidden = false;
   elements.sourceVideo.src = appState.objectUrl;
   await waitForVideo(elements.sourceVideo);
-  elements.sourceVideo.hidden = false;
 
   appState.analysis = null;
   appState.analysisInProgress = false;
